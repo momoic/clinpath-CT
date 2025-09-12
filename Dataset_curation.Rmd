@@ -1,0 +1,382 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-08-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+6253 starting patients
+```{r}
+library(xlsx)
+library(tidyr)
+library(dplyr)
+library(stringr)
+clinical = read.csv("C://PhD work//clinpath_CT//De_ID_DTA_BDR_171523_Melanoma_20230801 CDE.csv")
+ht.wt = read.csv("C://PhD work//clinpath_CT//De_ID_DTA_BDR_171523_Melanoma_20230801 Height Weight.csv")
+BMI = read.csv("C://PhD work//clinpath_CT//De_ID_DTA_BDR_171523_Melanoma_20230801 BMI.csv")
+histo = read.csv("C://PhD work//clinpath_CT//De_ID_DTA_BDR_171523_Melanoma_20230801 histo.csv")
+```
+
+```{r}
+clinical = merge(clinical, histo, by = "Tumor.Number")
+colnames(clinical)[[2]] = "PT.ID"
+```
+
+
+Height and Weight data curation
+```{r}
+#take only the first measurements of height and weight, filter out entries that only have a weight measurement without the height
+ht.wt = ht.wt %>%
+  group_by(PT.ID) %>%
+  distinct(Description, .keep_all = TRUE) %>%
+  ungroup(PT.ID) 
+
+pt_ids = ht.wt %>%
+  group_by(Description) %>%
+  mutate(i1=row_number()) %>%
+  group_by(PT.ID) %>%
+  summarize(count = n()) %>%
+  filter(count > 1) %>%
+  pull(PT.ID)
+
+ht.wt_row = ht.wt %>%
+  filter(PT.ID %in% pt_ids) %>%
+  dplyr::select(!Dx.Date.to.Measurement.Date..Days.) %>%
+  dplyr::select(!PT.ID) %>%
+  group_by(Description) %>%
+  mutate(i1=row_number()) %>%
+  spread(Description, Value) %>%
+  dplyr::select(!i1)
+
+ht.wt_row$PT.ID = pt_ids
+ht.wt_row$Height = as.numeric(ht.wt_row$Height)
+ht.wt_row$Weight = as.numeric(ht.wt_row$Weight)
+ht.wt_row = na.omit(ht.wt_row)
+ht.wt_row = ht.wt_row[,c("PT.ID", "Height", "Weight")]
+
+```
+
+BMI curation
+```{r}
+BMI = BMI %>%
+  distinct(PT.ID, .keep_all=TRUE)
+
+length(BMI$PT.ID %in% ht.wt_row$PT.ID) #all BMI data is calculated from the height and weight so just keep the height and weight data
+```
+
+6160 patients younger than 90 years old
+```{r}
+
+clinical$Sex <- NA
+clinical$Sex[clinical$SexDescription == "Male"] <- 1
+clinical$Sex[clinical$SexDescription == "Female"] <- 0
+
+clinical = subset(clinical, DxAge.DeID != ">89")
+
+```
+
+4943 patients after selecting only most common melanomas
+```{r}
+clinical %>%
+  group_by(HistologyDescription.x) %>%
+  summarize(count = n())
+
+clinical$Superficial_Spreading <- 0
+clinical$Superficial_Spreading[clinical$HistologyDescription.x == "Superficial spreading melanoma (C44. _)"] <- 1
+
+clinical$Nodular <- 0
+clinical$Nodular[clinical$HistologyDescription.x == "Nodular melanoma"] <- 1
+
+clinical$Desmoplastic <- 0
+clinical$Desmoplastic[clinical$HistologyDescription.x == "Desmoplastic melanoma, malignant"] <- 1
+
+clinical$Lentigo_Maligna <- 0
+clinical$Lentigo_Maligna[clinical$HistologyDescription.x == "Lentigo maligna melanoma"] <- 1
+
+clinical$Acral_Lentiginous <- 0
+clinical$Acral_Lentiginous[clinical$HistologyDescription.x == "Acral lentiginous melanoma, malignant (C44._)"] <- 1
+
+clinical <- subset(clinical, Superficial_Spreading == 1 | Nodular == 1 | Desmoplastic == 1 | Lentigo_Maligna == 1 |Acral_Lentiginous == 1)
+```
+
+4915 patients after selecting for areas of skin to analyze
+```{r}
+faceheadneck_list = c("Skin of other/unspecified parts of face, NOS", "Skin of cheek", "Skin of scalp and neck", "Skin of forehead", "Skin of scalp", "Skin of neck", "Skin of temple", "Skin of face", "Skin of nose", "Skin of lip", "Skin of head, NOS", "Skin of ear, NOS", "Skin of auricle", "Skin of jaw", "Skin of chin", "Skin of lower lip", "Skin of supraclavicular region")
+
+upperlimbshoulder_list = c("Skin of upper limb and shoulder", "Skin of forearm", "Skin of arm", "Skin of shoulder", "Skin of finger", "Skin of elbow", "Skin of thumb", "Skin of upper limb", "Skin of wrist", "Skin of hand", "Skin of antecubital space", "Skin of scapular region", "Skin of palm")
+                           
+lowerlimbhip_list = c("Skin of lower limb and hip", "Skin of leg", "Skin of lower limb", "Skin of toe", "Skin of knee", "Skin of foot", "Skin of thigh", "Skin of calf", "Skin of heel", "Skin of hip", "Skin of ankle", "Skin of chest wall")
+
+trunk_list = c("Skin of trunk", "Skin of back", "Skin of abdomen", "Skin of flank", "Skin of chest", "Skin of breast", "Skin of abdominal wall")
+
+clinical$FaceHeadNeck <- 0
+clinical$FaceHeadNeck[clinical$PrimarySiteDescription.x %in% faceheadneck_list] <- 1
+
+clinical$UpperLimbShoulder <- 0
+clinical$UpperLimbShoulder[clinical$PrimarySiteDescription.x %in% upperlimbshoulder_list] <- 1
+
+clinical$LowerLimbHip <- 0
+clinical$LowerLimbHip[clinical$PrimarySiteDescription.x  %in% lowerlimbhip_list] <- 1
+
+clinical$Trunk <- 0
+clinical$Trunk[clinical$PrimarySiteDescription.x %in% trunk_list] <- 1
+
+unique(subset(clinical, !(clinical$PrimarySiteDescription.x %in% c(faceheadneck_list, upperlimbshoulder_list, lowerlimbhip_list, trunk_list)))$PrimarySiteDescription) #check remaining tags to ensure none are missing that should be added
+
+
+clinical <- subset(clinical, Trunk == 1 | UpperLimbShoulder == 1 | FaceHeadNeck == 1 | LowerLimbHip == 1)
+```
+
+
+```{r}
+# unique(clinical$TobaccoDescription)
+# clinical %>%
+#   group_by(TobaccoDescription) %>%
+#   summarize(count = n())
+  
+```
+
+Adding in height, weight info results in 4378 patients with available data
+```{r}
+clinical = merge(ht.wt_row, clinical, by = "PT.ID")
+```
+
+```{r}
+rm_depths = c("Microinvasion; microscopic focus or foci only and no depth given", "   ", "No mass/tumor found", "", "888","Not applicable: Information not collected for this schema", "", ""    )
+
+for (i in nrow(clinical)) {
+  clinical$Breslow.Depth[i] = gsub("^[[:space:]]*", "", clinical$Breslow.Depth[i])
+}
+
+clinical$Breslow.Depth[clinical$Breslow.Depth %in% rm_depths] = NA
+clinical$Breslow.Depth[clinical$Breslow.Depth == "≥9.80 mm"] = 9.80
+
+clinical = clinical %>%
+  mutate(Breslow.Depth = str_sub(Breslow.Depth, 1, nchar(Breslow.Depth) - 3))
+
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. %in% c("", "Microinvasion; microscopic focus or foci only and no depth given", " ")] <- NA
+
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == ">9.9 mm"] <- "9.9"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.7 mm"] <- "0.7"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.6 mm"] <- "0.6"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.1 mm"] <- "0.1"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 2.5 mm"] <- "2.5"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.3 mm"] <- "0.3"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.0 mm"] <- "1.0"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 3.0 mm"] <- "3.0"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.2 mm"] <- "0.2"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.8 mm"] <- "1.8"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.1 mm"] <- "1.1"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.9 mm"] <- "0.9"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 4.8 mm"] <- "4.8"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.5 mm"] <- "0.5"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.3 mm"] <- "1.3"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.2 mm"] <- "1.2"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.5 mm"] <- "1.5"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.7 mm"] <- "1.7"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 2.8 mm"] <- "2.8"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 9.8 mm"] <- "9.8"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.8 mm"] <- "0.8"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.9 mm"] <- "1.9"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 3.1 mm"] <- "3.1"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 3.3 mm"] <- "3.3"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 2.2 mm"] <- "2.2"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 6.3 mm"] <- "6.3"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 4.3 mm"] <- "4.3"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 2.0 mm"] <- "2.0"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 2.1 mm"] <- "2.1"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.6 mm"] <- "1.6"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.5 mm"] <- "0.5"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.3 mm"] <- "0.3"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.5 mm"] <- "1.5"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 3.0 mm"] <- "3.0"
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 1.8 mm"] <- "1.8"
+
+
+clinical <- subset(clinical, is.na(Breslow.Depth) == FALSE | is.na(Breslow.Thickness..mm.) == FALSE)
+
+clinical$Breslow.Depth = as.numeric(clinical$Breslow.Depth)
+clinical$Breslow.Thickness..mm. = as.numeric(clinical$Breslow.Thickness..mm.)
+
+bd <- c()
+for (i in 1:nrow(clinical)){
+
+    if (is.na(clinical$Breslow.Thickness..mm.[[i]]) == FALSE){
+    depth <-  clinical$Breslow.Thickness..mm.[[i]]
+    }
+    if (is.na(clinical$Breslow.Depth[[i]]) == FALSE){
+    depth <- clinical$Breslow.Depth[[i]]
+  }
+  bd <- c(bd, depth)
+}
+clinical$Breslow_Depth <- unlist(bd)
+
+rm_ulc = c("", " ", "Not documented in medical record")
+rm_ulc_stat = c("", "   ", "Unknown or no information present", "888", "030", "Not applicable: information not collected for this case")
+
+clinical$Ulceration[clinical$Ulceration %in% rm_ulc] = NA 
+clinical$Ulceration.Status[clinical$Ulceration.Status %in% rm_ulc_stat] = NA 
+clinical$Ulceration[clinical$Ulceration == "Ulceration present"] <- 1
+clinical$Ulceration[clinical$Ulceration == "Ulceration not identified/not present"] <- 0
+
+clinical$Ulceration.Status[clinical$Ulceration.Status == "Ulceration present"] <- 1
+clinical$Ulceration.Status[clinical$Ulceration.Status == "No ulceration present"] <- 0
+
+clinical <- subset(clinical, is.na(Ulceration) == FALSE | is.na(Ulceration.Status) == FALSE)
+
+ulc <- c()
+for (i in 1:nrow(clinical)){
+  if (is.na(clinical$Ulceration[[i]]) == FALSE){
+    u <- clinical$Ulceration[[i]]
+  }
+    if (is.na(clinical$Ulceration.Status[[i]]) == FALSE){
+    u <- clinical$Ulceration.Status[[i]]
+    }
+  ulc <- c(ulc, u)
+}
+
+clinical$Ulceration <- unlist(ulc)
+
+```
+
+```{r}
+clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. %in% c("", "Not documented in medical record", " ", "Stated as \"less than 1 mitosis/square mm\"", " Stated as \"at least 1 mitosis/square mm\"")] <- NA
+
+new.mr <- c()
+for (i in 1:nrow(clinical)){
+  new <- substr(clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[[i]], 1, (nchar(clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[[i]])-18))
+  new.mr <- c(new.mr, new)
+}
+
+
+clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. <- unlist(new.mr)
+
+clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. == "04"] <- 4
+
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate %in% c("Not applicable: Information not collected for this case", "", "Unknown or no information", "Stated as \"less than 1 mitosis/square mm\"", "Unknown or no information", "888", "No histologic examination of primary site.", "014", "Mitotic rate described with denominator other than square millimeter (mm)")] <- NA
+
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "0 mitoses per square millimeter (mm)"] <- 0
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "1 mitosis per square mm"] <- 1
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "2 mitoses per square mm"] <- 2
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "3 mitoses per square mm"] <- 3
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "4 mitoses per square mm"] <- 4
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "5 mitoses per square mm"] <- 5
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "6 mitoses per square mm"] <- 6
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "7 mitoses per square mm"] <- 7
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "8 mitoses per square mm"] <- 8
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "9 mitoses per square mm"] <- 9
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "10 mitoses per square mm"] <- 10
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "11 or more mitoses per square mm"] <- 11
+
+clinical <- subset(clinical, is.na(Primary.Tumor.Mitotic.Count.Rate) == FALSE | is.na(MitoticRateMelano..vw_metriq_cde_ssf_ssdi.) == FALSE)
+
+mr <- c()
+for (i in 1:nrow(clinical)){
+
+    if (is.na(clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[[i]]) == FALSE){
+    rate <-  clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[[i]]
+    }
+    if (is.na(clinical$Primary.Tumor.Mitotic.Count.Rate[[i]]) == FALSE){
+    rate <- clinical$Primary.Tumor.Mitotic.Count.Rate[[i]]
+  }
+  mr <- c(mr, rate)
+}
+clinical$Mitotic_Rate <- unlist(mr)
+```
+
+```{r}
+clinical$MSS = 0
+clinical$MSS[clinical$DeathCauseDescription == "Dead From This CA or Complications of CA"] <- 1
+clinical$MSS_Time = clinical$Survival
+```
+
+```{r}
+clinical$Mets = 2
+
+clinical$Mets[clinical$RecurrenceTypeFirstDescription == "Patient became disease-free after treatment and has not had a recurrence."] =  0
+
+clinical$Mets[clinical$RecurrenceTypeFirstDescription %in% c("Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51–59).", "Recurrence of an invasive tumor in regional lymph nodes only.", "Distant recurrence of an invasive tumor in the lung only. Lung includes the visceral pleura.", "Distant recurrence of an invasive tumor in the CNS only. This includes the brain and spinal cord, but not the external eye.", "Distant recurrence of an invasive tumor in lymph node only. Refer to the staging scheme for a description of lymph nodes that are distant for a particular site.", "Recurrence of an invasive tumor in adjacent tissue or organ(s) and in regional lymph nodes (both 21 and 22) at the same time.", "Distant recurrence, to a site not listed in 46-62 or there is insufficient information available to code to 46–62.", "Distant recurrence of an invasive tumor in liver only ", "Distant recurrence of an invasive tumor in the skin only. This includes skin other than the primary site.", "Distant recurrence of an invasive tumor in bone only. This includes bones other than the primary site.", "Distant recurrence of an invasive tumor in a single distant site (51–58) and local, trocar and/or regional recurrence (10–15, 20–25, or 30).", "Regional recurrence, and there is insufficient information available to code to 21–27.", "Distant recurrence of an invasive tumor in the peritoneum only. Peritoneum includes peritoneal surfaces of all structures within the abdominal cavity and/or positive ascitic fluid.", "Distant systemic recurrence of an invasive tumor only. This includes lymphoma, leukemia, bone marrow metastasis, carcinomatosis, generalized disease.", "Both regional recurrence of an invasive tumor in adjacent tissue or organs(s) and/or regional lymph nodes (20–25) and local and/or trocar recurrence (10, 13, 14, or 15)..")] <- 1
+
+clinical$Mets[clinical$RecurrenceTypeFirstDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "", "Recurrence of an in situ tumor in adjacent tissue or organ(s) and in regional lymph nodes at the same time.", "Disease has recurred, but the type of recurrence is unknown.")] <- NA
+
+clinical <- subset(clinical, is.na(Mets) == FALSE)
+```
+
+```{r}
+# clinical$node_met = 2
+# clinical$node_met[clinical$Clin_N_TNM %in% c("c0", "cN0")|clinical$Path_N_TNM %in% c("p0", "pN0", "cN0")] = 0
+# clinical$node_met[clinical$Clin_N_TNM %in% c("", "88", "    ", "cX", "cNX") & clinical$Path_N_TNM %in% c("", "    ", "88", "pX", "pNX")] <- NA
+# 
+# clinical$node_met[clinical$Clin_N_TNM %in% c("c1", "c2", "cN1", "c3", "c1A",  "c1B",  "c2A",  "c2B",  "c2C", "cN2c", "cN1c", "cN1b", "cN3", "cN2a", "cN1a", "cN3b", "cN3a", "cN2",  "cN3c", "cN2b")|clinical$Path_N_TNM %in% c("p1", "p2", "pN1", "p3", "p1A",  "p1B",  "p2A",  "p2B",  "p2C", "pN2c", "pN1c", "pN1b", "pN3", "pN2a", "pN1a", "pN3b", "pN3a", "pN2",  "pN3c", "pN2b")] = 1
+                    
+clinical$node_met = 2
+clinical$node_met[clinical$RecurrenceTypeFirstDescription %in% c("Patient became disease-free after treatment and has not had a recurrence.", "Recurrence of an in situ tumor in adjacent tissue or organ(s) and in regional lymph nodes at the same time.", "Disease has recurred, but the type of recurrence is unknown.", "Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51–59).", "Distant recurrence of an invasive tumor in the lung only. Lung includes the visceral pleura.", "Distant recurrence of an invasive tumor in the CNS only. This includes the brain and spinal cord, but not the external eye.", "Distant recurrence of an invasive tumor in lymph node only. Refer to the staging scheme for a description of lymph nodes that are distant for a particular site.", "Distant recurrence, to a site not listed in 46-62 or there is insufficient information available to code to 46–62.", "Distant recurrence of an invasive tumor in liver only ", "Distant recurrence of an invasive tumor in the skin only. This includes skin other than the primary site.", "Distant recurrence of an invasive tumor in bone only. This includes bones other than the primary site.", "Distant recurrence of an invasive tumor in a single distant site (51–58) and local, trocar and/or regional recurrence (10–15, 20–25, or 30).", "Distant recurrence of an invasive tumor in the peritoneum only. Peritoneum includes peritoneal surfaces of all structures within the abdominal cavity and/or positive ascitic fluid.", "Distant systemic recurrence of an invasive tumor only. This includes lymphoma, leukemia, bone marrow metastasis, carcinomatosis, generalized disease.")] =  0
+
+clinical$node_met[clinical$RecurrenceTypeFirstDescription %in% c("Recurrence of an invasive tumor in regional lymph nodes only.", "Recurrence of an invasive tumor in adjacent tissue or organ(s) and in regional lymph nodes (both 21 and 22) at the same time.",  "Regional recurrence, and there is insufficient information available to code to 21–27.", "Both regional recurrence of an invasive tumor in adjacent tissue or organs(s) and/or regional lymph nodes (20–25) and local and/or trocar recurrence (10, 13, 14, or 15)..")] <- 1
+
+clinical$node_met[clinical$RecurrenceTypeFirstDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "")] <- NA
+
+
+clinical <- subset(clinical, is.na(node_met) == FALSE)
+```
+
+
+6 patients that had multiple melanomas
+
+```{r}
+remet_pts = (clinical %>%
+  group_by(PT.ID) %>%
+  filter(Mets == 1) %>%
+  summarize(count = n()) %>%
+  filter(count >1))[[1]]
+
+clinical = subset(clinical, !(PT.ID %in% remet_pts))
+```
+
+
+```{r}
+time <- c()
+
+nrow(subset(clinical, Mets == 1))
+nrow(subset(clinical, Mets == 0))
+
+for (i in 1:nrow(clinical)){
+  if (clinical$Mets[[i]] == 1){
+    t <- clinical$Dx.Date.to.First.Recurrence.Date..Months.[[i]]
+  }
+    if (clinical$Mets[[i]] == 0){
+    t <- clinical$Survival[[i]]
+    }
+  time <- c(time, t)
+}
+
+clinical$Met_Time <- unlist(time)
+
+```
+
+```{r}
+clinical = clinical %>%
+  mutate(BMI = Weight/(Height/100)**2)
+
+```
+
+```{r}
+clinical <- clinical[,c("DxAge.DeID", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
+colnames(clinical) <- c("Age", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
+clinical = na.omit(clinical)
+
+#write.csv(clinical, "C://PhD work//clinpath_CT//clinical_ht-wt-node.csv", row.names = FALSE)
+```
+
+```{r}
+
+# clinical <- clinical[,c("DxAge.DeID", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "Mets", "Met_Time", "MSS", "MSS_Time")]
+# colnames(clinical) <- c("Age", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "Mets", "Met_Time", "MSS", "MSS_Time")
+# clinical = na.omit(clinical)
+# 
+# write.csv(clinical, "C://PhD work//clinpath_CT//roswell_no_added.csv", row.names = FALSE)
+```
+
