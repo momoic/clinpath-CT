@@ -14,10 +14,17 @@ library(xlsx)
 library(tidyr)
 library(dplyr)
 library(stringr)
-clinical = read.csv("C://PhD work//clinpath_CT//De_ID_DTA_BDR_171523_Melanoma_20230801 CDE.csv")
-ht.wt = read.csv("C://PhD work//clinpath_CT//De_ID_DTA_BDR_171523_Melanoma_20230801 Height Weight.csv")
-BMI = read.csv("C://PhD work//clinpath_CT//De_ID_DTA_BDR_171523_Melanoma_20230801 BMI.csv")
-histo = read.csv("C://PhD work//clinpath_CT//De_ID_DTA_BDR_171523_Melanoma_20230801 histo.csv")
+clinical = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_clinical.csv")
+meds = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_meds.csv")
+orders = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_orders.csv")
+PMH = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_PMH.csv")
+treatment = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_treatment.csv")
+
+clinical_2023 = read.csv("C://PhD work//clinpath_CT//2023_roswell//De_ID_DTA_BDR_171523_Melanoma_20230801 CDE.csv")
+
+ht.wt = read.csv("C://PhD work//clinpath_CT//2023_roswell//De_ID_DTA_BDR_171523_Melanoma_20230801 Height Weight.csv")
+BMI = read.csv("C://PhD work//clinpath_CT//2023_roswell//De_ID_DTA_BDR_171523_Melanoma_20230801 BMI.csv")
+histo = read.csv("C://PhD work//clinpath_CT//2023_roswell//De_ID_DTA_BDR_171523_Melanoma_20230801 histo.csv")
 ```
 
 ```{r}
@@ -74,7 +81,7 @@ clinical$Sex <- NA
 clinical$Sex[clinical$SexDescription == "Male"] <- 1
 clinical$Sex[clinical$SexDescription == "Female"] <- 0
 
-clinical = subset(clinical, DxAge.DeID != ">89")
+clinical = subset(clinical, DxAge != ">89")
 
 ```
 
@@ -84,22 +91,24 @@ clinical %>%
   group_by(HistologyDescription.x) %>%
   summarize(count = n())
 
+histo_desc = unique(clinical$HistologyDescription.x)
+
 clinical$Superficial_Spreading <- 0
-clinical$Superficial_Spreading[clinical$HistologyDescription.x == "Superficial spreading melanoma (C44. _)"] <- 1
+clinical$Superficial_Spreading[clinical$HistologyDescription.x == grep("cumulative|superficial", histo_desc, ignore.case = TRUE, value = TRUE)] <- 1
 
 clinical$Nodular <- 0
-clinical$Nodular[clinical$HistologyDescription.x == "Nodular melanoma"] <- 1
+clinical$Nodular[clinical$HistologyDescription.x == grep("nodular", histo_desc, ignore.case = TRUE, value = TRUE)] <- 1
 
 clinical$Desmoplastic <- 0
-clinical$Desmoplastic[clinical$HistologyDescription.x == "Desmoplastic melanoma, malignant"] <- 1
+clinical$Desmoplastic[clinical$HistologyDescription.x == grep("desmoplastic", histo_desc, ignore.case = TRUE, value = TRUE)] <- 1
 
 clinical$Lentigo_Maligna <- 0
-clinical$Lentigo_Maligna[clinical$HistologyDescription.x == "Lentigo maligna melanoma"] <- 1
+clinical$Lentigo_Maligna[clinical$HistologyDescription.x == grep("lentigo maligna", histo_desc, ignore.case = TRUE, value = TRUE)] <- 1
 
-clinical$Acral_Lentiginous <- 0
-clinical$Acral_Lentiginous[clinical$HistologyDescription.x == "Acral lentiginous melanoma, malignant (C44._)"] <- 1
+#clinical$Acral_Lentiginous <- 0
+#clinical$Acral_Lentiginous[clinical$HistologyDescription.x == grep("lentigo", histo_desc, ignore.case = TRUE, value = TRUE)] <- 1
 
-clinical <- subset(clinical, Superficial_Spreading == 1 | Nodular == 1 | Desmoplastic == 1 | Lentigo_Maligna == 1 |Acral_Lentiginous == 1)
+clinical <- subset(clinical, Superficial_Spreading == 1 | Nodular == 1 | Desmoplastic == 1 | Lentigo_Maligna == 1)
 ```
 
 4915 patients after selecting for areas of skin to analyze
@@ -290,18 +299,22 @@ clinical$Mitotic_Rate <- unlist(mr)
 ```{r}
 clinical$MSS = 0
 clinical$MSS[clinical$DeathCauseDescription == "Dead From This CA or Complications of CA"] <- 1
-clinical$MSS_Time = clinical$Survival
+clinical$MSS_Time = clinical$Overall.Survival.Time..Months.
 ```
 
 ```{r}
 clinical$Mets = 2
 
-clinical$Mets[clinical$RecurrenceTypeFirstDescription == "Patient became disease-free after treatment and has not had a recurrence."] =  0
+unique(clinical$X1stRecurrenceTypeDescription)
 
-clinical$Mets[clinical$RecurrenceTypeFirstDescription %in% c("Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51–59).", "Recurrence of an invasive tumor in regional lymph nodes only.", "Distant recurrence of an invasive tumor in the lung only. Lung includes the visceral pleura.", "Distant recurrence of an invasive tumor in the CNS only. This includes the brain and spinal cord, but not the external eye.", "Distant recurrence of an invasive tumor in lymph node only. Refer to the staging scheme for a description of lymph nodes that are distant for a particular site.", "Recurrence of an invasive tumor in adjacent tissue or organ(s) and in regional lymph nodes (both 21 and 22) at the same time.", "Distant recurrence, to a site not listed in 46-62 or there is insufficient information available to code to 46–62.", "Distant recurrence of an invasive tumor in liver only ", "Distant recurrence of an invasive tumor in the skin only. This includes skin other than the primary site.", "Distant recurrence of an invasive tumor in bone only. This includes bones other than the primary site.", "Distant recurrence of an invasive tumor in a single distant site (51–58) and local, trocar and/or regional recurrence (10–15, 20–25, or 30).", "Regional recurrence, and there is insufficient information available to code to 21–27.", "Distant recurrence of an invasive tumor in the peritoneum only. Peritoneum includes peritoneal surfaces of all structures within the abdominal cavity and/or positive ascitic fluid.", "Distant systemic recurrence of an invasive tumor only. This includes lymphoma, leukemia, bone marrow metastasis, carcinomatosis, generalized disease.", "Both regional recurrence of an invasive tumor in adjacent tissue or organs(s) and/or regional lymph nodes (20–25) and local and/or trocar recurrence (10, 13, 14, or 15)..")] <- 1
 
-clinical$Mets[clinical$RecurrenceTypeFirstDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "", "Recurrence of an in situ tumor in adjacent tissue or organ(s) and in regional lymph nodes at the same time.", "Disease has recurred, but the type of recurrence is unknown.")] <- NA
+clinical$Mets[clinical$X1stRecurrenceTypeDescription == "Patient became disease-free after treatment and has not had a recurrence; leukemia in remission."] =  0
 
+clinical$Mets[clinical$X1stRecurrenceTypeDescription %in% c("Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51–59).", "Recurrence of an invasive tumor in regional lymph nodes only.", "Distant recurrence of an invasive tumor in the lung only. Lung includes the visceral pleura.", "Distant recurrence of an invasive tumor in the CNS only. This includes the brain and spinal cord, but not the external eye.", "Distant recurrence of an invasive tumor in lymph node only. Refer to the staging scheme for a description of lymph nodes that are distant for a particular site.", "Recurrence of an invasive tumor in adjacent tissue or organ(s) and in regional lymph nodes (both 21 and 22) at the same time.", "Distant recurrence, to a site not listed in 46-62 or there is insufficient information available to code to 46–62.", "Distant recurrence of an invasive tumor in liver only ", "Distant recurrence of an invasive tumor in the skin only. This includes skin other than the primary site.", "Distant recurrence of an invasive tumor in bone only. This includes bones other than the primary site.", "Distant recurrence of an invasive tumor in a single distant site (51–58) and local, trocar and/or regional recurrence (10–15, 20–25, or 30).", "Regional recurrence, and there is insufficient information available to code to 21–27.", "Distant recurrence of an invasive tumor in the peritoneum only. Peritoneum includes peritoneal surfaces of all structures within the abdominal cavity and/or positive ascitic fluid.", "Distant systemic recurrence of an invasive tumor only. This includes lymphoma, leukemia, bone marrow metastasis, carcinomatosis, generalized disease.", "Both regional recurrence of an invasive tumor in adjacent tissue or organs(s) and/or regional lymph nodes (20–25) and local and/or trocar recurrence (10, 13, 14, or 15)..", "Distant recurrence of an invasive tumor in the liver only.", "Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51-59).", "Distant recurrence and there is insufficient information available to code to 46-62.", "Distant systemic recurrence of an invasive tumor only. This includes leukemia, bone marrow metastasis, carcinomatosis, and generalized disease.", "Regional recurrence, and there is insufficient information available to code to 21-27.", "Distant recurrence of an invasive tumor in a single distant site (51-58) and local, trocar, and/or regional recurrence (10-15, 20-25, or 30).")] <- 1
+
+clinical$Mets[clinical$X1stRecurrenceTypeDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "", "Recurrence of an in situ tumor in adjacent tissue or organ(s) and in regional lymph nodes at the same time.", "Disease has recurred, but the type of recurrence is unknown.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated.", "It is unknown whether the disease has recurred or if the patient was ever disease-free.", "Local recurrence of an invasive tumor.", "Local recurrence and there is insufficient information available to code to 13-17. Recurrence is confined to the remnant of the organ of origin; to the organ of origin; to the anastomosis; or to scar tissue where the organ previously existed.")] <- NA
+
+      
 clinical <- subset(clinical, is.na(Mets) == FALSE)
 ```
 
@@ -313,13 +326,14 @@ clinical <- subset(clinical, is.na(Mets) == FALSE)
 # clinical$node_met[clinical$Clin_N_TNM %in% c("c1", "c2", "cN1", "c3", "c1A",  "c1B",  "c2A",  "c2B",  "c2C", "cN2c", "cN1c", "cN1b", "cN3", "cN2a", "cN1a", "cN3b", "cN3a", "cN2",  "cN3c", "cN2b")|clinical$Path_N_TNM %in% c("p1", "p2", "pN1", "p3", "p1A",  "p1B",  "p2A",  "p2B",  "p2C", "pN2c", "pN1c", "pN1b", "pN3", "pN2a", "pN1a", "pN3b", "pN3a", "pN2",  "pN3c", "pN2b")] = 1
                     
 clinical$node_met = 2
-clinical$node_met[clinical$RecurrenceTypeFirstDescription %in% c("Patient became disease-free after treatment and has not had a recurrence.", "Recurrence of an in situ tumor in adjacent tissue or organ(s) and in regional lymph nodes at the same time.", "Disease has recurred, but the type of recurrence is unknown.", "Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51–59).", "Distant recurrence of an invasive tumor in the lung only. Lung includes the visceral pleura.", "Distant recurrence of an invasive tumor in the CNS only. This includes the brain and spinal cord, but not the external eye.", "Distant recurrence of an invasive tumor in lymph node only. Refer to the staging scheme for a description of lymph nodes that are distant for a particular site.", "Distant recurrence, to a site not listed in 46-62 or there is insufficient information available to code to 46–62.", "Distant recurrence of an invasive tumor in liver only ", "Distant recurrence of an invasive tumor in the skin only. This includes skin other than the primary site.", "Distant recurrence of an invasive tumor in bone only. This includes bones other than the primary site.", "Distant recurrence of an invasive tumor in a single distant site (51–58) and local, trocar and/or regional recurrence (10–15, 20–25, or 30).", "Distant recurrence of an invasive tumor in the peritoneum only. Peritoneum includes peritoneal surfaces of all structures within the abdominal cavity and/or positive ascitic fluid.", "Distant systemic recurrence of an invasive tumor only. This includes lymphoma, leukemia, bone marrow metastasis, carcinomatosis, generalized disease.")] =  0
+clinical$node_met[clinical$X1stRecurrenceTypeDescription %in% c("Patient became disease-free after treatment and has not had a recurrence.", "Patient became disease-free after treatment and has not had a recurrence; leukemia in remission.", "Recurrence of an in situ tumor in adjacent tissue or organ(s) and in regional lymph nodes at the same time.", "Disease has recurred, but the type of recurrence is unknown.", "Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51–59).", "Distant recurrence of an invasive tumor in the lung only. Lung includes the visceral pleura.", "Distant recurrence of an invasive tumor in the CNS only. This includes the brain and spinal cord, but not the external eye.", "Distant recurrence of an invasive tumor in lymph node only. Refer to the staging scheme for a description of lymph nodes that are distant for a particular site.", "Distant recurrence, to a site not listed in 46-62 or there is insufficient information available to code to 46–62.", "Distant recurrence of an invasive tumor in liver only ", "Distant recurrence of an invasive tumor in the skin only. This includes skin other than the primary site.", "Distant recurrence of an invasive tumor in bone only. This includes bones other than the primary site.", "Distant recurrence of an invasive tumor in a single distant site (51–58) and local, trocar and/or regional recurrence (10–15, 20–25, or 30).", "Distant recurrence of an invasive tumor in the peritoneum only. Peritoneum includes peritoneal surfaces of all structures within the abdominal cavity and/or positive ascitic fluid.", "Distant systemic recurrence of an invasive tumor only. This includes lymphoma, leukemia, bone marrow metastasis, carcinomatosis, generalized disease.", "Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51–59).", "Distant recurrence of an invasive tumor in the lung only. Lung includes the visceral pleura.", "Distant recurrence of an invasive tumor in the CNS only. This includes the brain and spinal cord, but not the external eye.", "Distant recurrence of an invasive tumor in lymph node only. Refer to the staging scheme for a description of lymph nodes that are distant for a particular site.", "Distant recurrence, to a site not listed in 46-62 or there is insufficient information available to code to 46–62.", "Distant recurrence of an invasive tumor in liver only ", "Distant recurrence of an invasive tumor in the skin only. This includes skin other than the primary site.", "Distant recurrence of an invasive tumor in bone only. This includes bones other than the primary site.", "Distant recurrence of an invasive tumor in a single distant site (51–58) and local, trocar and/or regional recurrence (10–15, 20–25, or 30).", "Distant recurrence of an invasive tumor in the peritoneum only. Peritoneum includes peritoneal surfaces of all structures within the abdominal cavity and/or positive ascitic fluid.", "Distant systemic recurrence of an invasive tumor only. This includes lymphoma, leukemia, bone marrow metastasis, carcinomatosis, generalized disease.","Distant recurrence of an invasive tumor in the liver only.", "Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51-59).", "Distant recurrence and there is insufficient information available to code to 46-62.", "Distant systemic recurrence of an invasive tumor only. This includes leukemia, bone marrow metastasis, carcinomatosis, and generalized disease.", "Distant recurrence of an invasive tumor in a single distant site (51-58) and local, trocar, and/or regional recurrence (10-15, 20-25, or 30).")] =  0
 
-clinical$node_met[clinical$RecurrenceTypeFirstDescription %in% c("Recurrence of an invasive tumor in regional lymph nodes only.", "Recurrence of an invasive tumor in adjacent tissue or organ(s) and in regional lymph nodes (both 21 and 22) at the same time.",  "Regional recurrence, and there is insufficient information available to code to 21–27.", "Both regional recurrence of an invasive tumor in adjacent tissue or organs(s) and/or regional lymph nodes (20–25) and local and/or trocar recurrence (10, 13, 14, or 15)..")] <- 1
+clinical$node_met[clinical$X1stRecurrenceTypeDescription %in% c("Recurrence of an invasive tumor in regional lymph nodes only.", "Recurrence of an invasive tumor in adjacent tissue or organ(s) and in regional lymph nodes (both 21 and 22) at the same time.", "Regional recurrence, and there is insufficient information available to code to 21–27.",  "Both regional recurrence of an invasive tumor in adjacent tissue or organs(s) and/or regional lymph nodes (20–25) and local and/or trocar recurrence (10, 13, 14, or 15)..", "Regional recurrence, and there is insufficient information available to code to 21-27.")] <- 1
 
-clinical$node_met[clinical$RecurrenceTypeFirstDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "")] <- NA
+clinical$node_met[clinical$X1stRecurrenceTypeDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "")] <- NA
 
-
+unique(clinical[clinical$node_met == 2, c("X1stRecurrenceTypeDescription")])
+ 
 clinical <- subset(clinical, is.na(node_met) == FALSE)
 ```
 
@@ -340,15 +354,16 @@ clinical = subset(clinical, !(PT.ID %in% remet_pts))
 ```{r}
 time <- c()
 
+
 nrow(subset(clinical, Mets == 1))
 nrow(subset(clinical, Mets == 0))
 
 for (i in 1:nrow(clinical)){
   if (clinical$Mets[[i]] == 1){
-    t <- clinical$Dx.Date.to.First.Recurrence.Date..Months.[[i]]
+    t <- clinical$Time.to.First.Recurrence..Months.[[i]]
   }
     if (clinical$Mets[[i]] == 0){
-    t <- clinical$Survival[[i]]
+    t <- clinical$Overall.Survival.Time..Months.[[i]]
     }
   time <- c(time, t)
 }
@@ -364,19 +379,118 @@ clinical = clinical %>%
 ```
 
 ```{r}
-clinical <- clinical[,c("DxAge.DeID", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
-colnames(clinical) <- c("Age", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
-clinical = na.omit(clinical)
+PMH %>%
+  group_by(Description) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count))
 
-#write.csv(clinical, "C://PhD work//clinpath_CT//clinical_ht-wt-node.csv", row.names = FALSE)
+unique(grep("diabetes", PMH$Description, value = TRUE, ignore.case = TRUE))
+#unique(grep("leukemia|lymphoma", PMH$Description, value = TRUE, ignore.case = TRUE))
+unique(grep("vitiligo", PMH$Description, value = TRUE, ignore.case = TRUE))
+#unique(grep("hyperchol*|hyperlip*", PMH$Description, value = TRUE, ignore.case = TRUE))
+#unique(grep("myeloma|myelodysplastic|myelopro*|myelofib*", PMH$Description, value = TRUE, ignore.case = TRUE))
+#unique(grep("hypertension", PMH$Description, value = TRUE, ignore.case = TRUE))
+unique(grep("rheumatoid|lupus|celiac|crohn|ulcerative|psoria*|sclerosis|ankylosing|myasthenia|dermatomyositis", PMH$Description, value = TRUE, ignore.case = TRUE))
+
+diabetes = intersect(grep("diabetes", PMH$Description, value = TRUE, ignore.case = TRUE), grep("prediabetes|family|induced|insipidus|pregnancy", PMH$Description, value = TRUE, invert = TRUE, ignore.case = TRUE))
+vitiligo = unique(grep("vitiligo", PMH$Description, value = TRUE, ignore.case = TRUE))
+
+
+#intersect(grep("leukemia|lymphoma", PMH$Description, value = TRUE, ignore.case = TRUE), grep("family", PMH$Description, value = TRUE, invert = TRUE, ignore.case = TRUE))
+
+PMH_target = PMH %>%
+  dplyr::select(PT.ID, Description) %>%
+  mutate(diabetes = ifelse(Description %in% diabetes, 1, 0)) %>%
+  mutate(vitiligo = ifelse(Description %in% vitiligo, 1, 0)) %>%
+  dplyr::select(-Description) %>%
+  group_by(PT.ID) %>%
+  summarize_all(max, na.rm = TRUE)
+  
+
 ```
 
 ```{r}
+combined = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//CombinedDrugList.xlsx", 1, startRow = 1)$Drug.Names)
+beta_blocker = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//BetaBlockerDrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+fibrate = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//FibrateDrugNames.xlsx", 1, startRow = 1)$Drug.Name)
+GLP1 = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//GLP1DrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+metformin = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//MetforminDrugNames.xlsx", 2, startRow = 1)$Drugnames)
+SGLT2 = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//SGLT2DrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+statin = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//StatinDrugNames.xlsx", 2, startRow = 1)$Drug.Name)
+sulf = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//SulfonylureaDrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+TZD = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//TZDDrugNames.xlsx", 1, startRow = 1)$Drug.Names)
 
-# clinical <- clinical[,c("DxAge.DeID", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "Mets", "Met_Time", "MSS", "MSS_Time")]
-# colnames(clinical) <- c("Age", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "Mets", "Met_Time", "MSS", "MSS_Time")
-# clinical = na.omit(clinical)
-# 
-# write.csv(clinical, "C://PhD work//clinpath_CT//roswell_no_added.csv", row.names = FALSE)
+
+
+meds_names = tolower(unique(word(meds$DrugName,1)))
+
+sum(meds_names %in% combined, na.rm = TRUE)
+no_betas = subset(meds_names, !(meds_names %in% beta_blocker))
+no_combined = subset(meds_names, !(meds_names %in% combined))
+
+colnames(meds)
+meds_target = meds %>%
+  dplyr::select(PT.ID, DrugName) %>%
+  mutate(DrugName = tolower(word(DrugName,1))) %>%
+  mutate(betablocker = ifelse(DrugName %in% beta_blocker, 1, 0))%>%
+  mutate(fibrate = ifelse(DrugName %in% fibrate, 1, 0))%>%
+  mutate(GLP1 = ifelse(DrugName %in% GLP1, 1, 0))%>%
+  mutate(metformin = ifelse(DrugName %in% metformin, 1, 0))%>%
+  mutate(SGLT2 = ifelse(DrugName %in% SGLT2, 1, 0))%>%
+  mutate(statin = ifelse(DrugName %in% statin, 1, 0))%>%
+  mutate(sulf = ifelse(DrugName %in% sulf, 1, 0))%>%
+  mutate(TZD = ifelse(DrugName %in% TZD, 1, 0)) %>%
+  distinct() %>%
+  dplyr::select(-DrugName) %>%
+  group_by(PT.ID) %>%
+  summarize_all(max, na.rm = TRUE)
+
+meds_target %>%
+  summarize_if(is.numeric, sum, na.rm = TRUE)
+
+
+# sum(meds_names %in% fibrate, na.rm = TRUE)
+# sum(meds_names %in% GLP1, na.rm = TRUE)
+# sum(meds_names %in% SGLT2, na.rm = TRUE)
+# sum(meds_names %in% statin, na.rm = TRUE)
+# sum(meds_names %in% TZD, na.rm = TRUE)
+# sum(meds_names %in% beta_blocker, na.rm = TRUE)
+# sum(meds_names %in% metformin, na.rm = TRUE)
+# sum(meds_names %in% sulf, na.rm = TRUE)
+
+
+# (meds_names %in% fibrate)
+# (meds_names %in% GLP1)
+# (meds_names %in% metformin)
+# (meds_names %in% SGLT2)
+# (meds_names %in% statin)
+# (meds_names %in% TZD)
+
+```
+
+```{r}
+clinical = right_join(clinical, meds_target, by = "PT.ID")
+clinical = merge(clinical, PMH_target, by = "PT.ID")
+```
+
+```{r}
+clinical <- clinical[,c("DxAge", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", 
+"betablocker", "fibrate", "GLP1", "metformin", "SGLT2", "statin", "sulf", "TZD", "diabetes", "vitiligo", "node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
+colnames(clinical) <- c("Age", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", 
+"Betablocker", "Fibrate", "GLP1", "Metformin", "SGLT2", "Statin", "Sulfonylureas", "TZD", "Diabetes", "Vitiligo", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
+clinical = na.omit(clinical)
+
+
+#write.csv(clinical, "C://PhD work//clinpath_CT//clinical_2023+2025.csv", row.names = FALSE)
+```
+
+
+```{r}
+clinical <- clinical[,c("DxAge", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", "node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
+
+colnames(clinical) <- c("Age", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
+clinical = na.omit(clinical)
+
+write.csv(clinical, "C://PhD work//clinpath_CT//roswell_no_added.csv", row.names = FALSE)
 ```
 

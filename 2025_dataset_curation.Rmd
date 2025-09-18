@@ -1,0 +1,190 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-09-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(xlsx)
+library(tidyr)
+library(dplyr)
+library(stringr)
+
+clinical = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_clinical.csv")
+meds = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_meds.csv")
+orders = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_orders.csv")
+PMH = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_PMH.csv")
+treatment = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_treatment.csv")
+```
+
+```{r}
+PMH %>%
+  group_by(Description) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count))
+
+unique(grep("diabetes", PMH$Description, value = TRUE, ignore.case = TRUE))
+#unique(grep("leukemia|lymphoma", PMH$Description, value = TRUE, ignore.case = TRUE))
+unique(grep("vitiligo", PMH$Description, value = TRUE, ignore.case = TRUE))
+#unique(grep("hyperchol*|hyperlip*", PMH$Description, value = TRUE, ignore.case = TRUE))
+#unique(grep("myeloma|myelodysplastic|myelopro*|myelofib*", PMH$Description, value = TRUE, ignore.case = TRUE))
+#unique(grep("hypertension", PMH$Description, value = TRUE, ignore.case = TRUE))
+unique(grep("rheumatoid|lupus|celiac|crohn|ulcerative|psoria*|sclerosis|ankylosing|myasthenia|dermatomyositis", PMH$Description, value = TRUE, ignore.case = TRUE))
+
+diabetes = intersect(grep("diabetes", PMH$Description, value = TRUE, ignore.case = TRUE), grep("prediabetes|family|induced|insipidus|pregnancy", PMH$Description, value = TRUE, invert = TRUE, ignore.case = TRUE))
+vitiligo = unique(grep("vitiligo", PMH$Description, value = TRUE, ignore.case = TRUE))
+
+
+#intersect(grep("leukemia|lymphoma", PMH$Description, value = TRUE, ignore.case = TRUE), grep("family", PMH$Description, value = TRUE, invert = TRUE, ignore.case = TRUE))
+
+PMH_target = PMH %>%
+  dplyr::select(PT.ID, Description) %>%
+  mutate(diabetes = ifelse(Description %in% diabetes, 1, 0)) %>%
+  mutate(vitiligo = ifelse(Description %in% vitiligo, 1, 0)) %>%
+  dplyr::select(-Description) %>%
+  group_by(PT.ID) %>%
+  summarize_all(max, na.rm = TRUE)
+  
+
+```
+"Essential (primary) hypertension"
+"Hypercalcemia"
+"Basal cell carcinoma of skin"
+"hyperlipidemia"
+"Chronic obstructive pulmonary disease"
+"heart failure"
+"hypercholesterolemia"
+"Type 2 diabetes mellitus"
+"Vitiligo"
+"Atherosclerotic heart disease"
+"chronic kidney disease"
+"squamous cell carcinoma of skin"
+"hemiplegia and hemiparesis"
+"sarcoidosis"
+"leukemia, lymphoma, myeloblastic, myeloproliferative"
+"ulcerative colitis"
+"crohn"
+"immunosuppression"
+"transplant"
+"lipoprotein"
+"diabetes"
+"lymphocytopenia"
+"celiac disease"
+"autoimmune"
+"hidradenitis suppurativa"
+"hyperglyceridemia"
+"bullous pemphigoid"
+
+sickle-cell
+sickle cell
+myasthenia gravis
+Kaposi
+systemic sclerosis
+myelodysplastic
+ulcerative colitis
+sarcoid myocarditis
+polyarteritis nodosa
+ankylosing spondylitis
+rheumatoid arthritis
+cirrhosis
+graft versus host
+inflammatory spondylopathy
+lupus erythematosus
+mycosis fungoides
+human immunodeficiency virus
+HIV
+myelofibrosis
+
+
+"thyroid"?
+"Zoster" ?
+"candida"?
+
+158 med names total, 124 of interest
+how do we want consider combined medications
+do we want to remove opthalmic beta blockers
+```{r}
+combined = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//CombinedDrugList.xlsx", 1, startRow = 1)$Drug.Names)
+beta_blocker = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//BetaBlockerDrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+fibrate = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//FibrateDrugNames.xlsx", 1, startRow = 1)$Drug.Name)
+GLP1 = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//GLP1DrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+metformin = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//MetforminDrugNames.xlsx", 2, startRow = 1)$Drugnames)
+SGLT2 = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//SGLT2DrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+statin = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//StatinDrugNames.xlsx", 2, startRow = 1)$Drug.Name)
+sulf = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//SulfonylureaDrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+TZD = tolower(read.xlsx("C://PhD work//clinpath_CT//Drug lists//TZDDrugNames.xlsx", 1, startRow = 1)$Drug.Names)
+
+
+
+meds_names = tolower(unique(word(meds$DrugName,1)))
+
+sum(meds_names %in% combined, na.rm = TRUE)
+no_betas = subset(meds_names, !(meds_names %in% beta_blocker))
+no_combined = subset(meds_names, !(meds_names %in% combined))
+
+colnames(meds)
+meds_target = meds %>%
+  dplyr::select(PT.ID, DrugName) %>%
+  mutate(DrugName = tolower(word(DrugName,1))) %>%
+  mutate(betablocker = ifelse(DrugName %in% beta_blocker, 1, 0))%>%
+  mutate(fibrate = ifelse(DrugName %in% fibrate, 1, 0))%>%
+  mutate(GLP1 = ifelse(DrugName %in% GLP1, 1, 0))%>%
+  mutate(metformin = ifelse(DrugName %in% metformin, 1, 0))%>%
+  mutate(SGLT2 = ifelse(DrugName %in% SGLT2, 1, 0))%>%
+  mutate(statin = ifelse(DrugName %in% statin, 1, 0))%>%
+  mutate(sulf = ifelse(DrugName %in% sulf, 1, 0))%>%
+  mutate(TZD = ifelse(DrugName %in% TZD, 1, 0)) %>%
+  distinct() %>%
+  dplyr::select(-DrugName) %>%
+  group_by(PT.ID) %>%
+  summarize_all(max, na.rm = TRUE)
+
+meds_target %>%
+  summarize_if(is.numeric, sum, na.rm = TRUE)
+
+
+# sum(meds_names %in% fibrate, na.rm = TRUE)
+# sum(meds_names %in% GLP1, na.rm = TRUE)
+# sum(meds_names %in% SGLT2, na.rm = TRUE)
+# sum(meds_names %in% statin, na.rm = TRUE)
+# sum(meds_names %in% TZD, na.rm = TRUE)
+# sum(meds_names %in% beta_blocker, na.rm = TRUE)
+# sum(meds_names %in% metformin, na.rm = TRUE)
+# sum(meds_names %in% sulf, na.rm = TRUE)
+
+
+# (meds_names %in% fibrate)
+# (meds_names %in% GLP1)
+# (meds_names %in% metformin)
+# (meds_names %in% SGLT2)
+# (meds_names %in% statin)
+# (meds_names %in% TZD)
+
+```
+```{r}
+clinical = right_join(clinical, meds_target, by = "PT.ID")
+clinical = merge(clinical, PMH_target, by = "PT.ID")
+```
+
+find patients who had orders before treatment, very short term
+```{r}
+# colnames(orders)
+# clinical[, c("PT.ID", "Year.of.Dx")]
+# orders[,c("PT.ID", "Name", "Year.of.Order")]
+# order_dates = right_join(clinical[, c("PT.ID", "Year.of.Dx")], 
+# orders[,c("PT.ID", "Name", "Year.of.Order")], by = "PT.ID")
+# 
+# subset(order_dates, Year.of.Dx > Year.of.Order)
+```
+
+1103 patients with active medications
+1259 patients undergoing immunotherapy
+```{r}
+nrow(subset(meds, StatusType == "Active"))
+nrow(subset(treatment, EventTypeDescription== "Immunotherapy"))
+```
+
