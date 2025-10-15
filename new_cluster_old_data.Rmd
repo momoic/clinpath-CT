@@ -1,0 +1,568 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-10-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(shapviz)
+library(ggplot2)
+library(caret)
+library(survival)
+library(survminer)
+library(dplyr)
+library(gtsummary)
+library(data.table)
+library(clusterGeneration)
+library(devtools)
+library(ClusterR)
+library(nnet)
+library(randomForest)
+library(e1071)
+library(xgboost)
+library(mclust)
+library(cluster)
+library(kernlab)
+library(mboost)
+library(treeshap)
+library(kernelshap)
+library(doFuture)
+library(forcats)
+library(dbscan)
+library(StatMatch)
+library(kamila)
+library(umap)
+library(uwot)
+library(philentropy)
+library(stepmixr)
+library(superml)
+library(reticulate)
+```
+
+Need to fix the significance calculation for low risk, need to think how to represent no met + high breslow depth in chi2 signficance test 
+
+```{r}
+calc_sig <- function(data, index){
+  risk_table = NULL
+  for (i in 1:index){
+    data$Comparison <- NA
+    data$Comparison[data$Group != unique(data$Group)[i]] <- "NC"
+    data$Comparison[data$Group == unique(data$Group)[i]] <- "C"
+    if (length(unique(data$Comparison)) > 1){
+    logrank <- survdiff(Surv(Met_Time, Mets) ~ Comparison, data = data)
+    pval <- logrank$pvalue
+    if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) > (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+      risk <- "HR"
+    }
+    if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) < (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+    risk <- "LR"
+    }
+    if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) == (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+    risk <- NA
+    }
+    if (!is.na(pval) & pval < 0.05){
+        sig <- "S"
+      }
+    if (!is.na(pval) & pval >= 0.05){
+        sig <- "NS"
+      }
+    row = data.frame("Risk" = risk, "Cluster" = unique(data$Group)[i], "Significance" = sig, "pval" = pval)
+    risk_table = rbind(risk_table, row)
+    }
+  }
+
+    lr_clusters = subset(risk_table, Risk == "LR")$Cluster
+    #low_risk = subset(data, data$Group %in% lr_clusters)
+    lr_sig = c()
+
+    for (i in 1:length(lr_clusters)){
+      data$Comparison <- NA
+      data$Comparison[data$Group != lr_clusters[i]] <- "NC"
+      data$Comparison[data$Group == lr_clusters[i]] <- "C"
+      # data$breslow_class = NA
+      # data$breslow_class[low_risk$Breslow_Depth >= 1] = "high"
+      # data$breslow_class[low_risk$Breslow_Depth < 1] = "low"
+      
+      if (length(unique(data$Comparison)) > 1 & length(unique(data$Mets))>1){
+      # logrank_pair <- pairwise_survdiff(Surv(Met_Time, Mets) ~ Comparison + breslow_class, data = data)
+      # pval = logrank_pair$p.value[[2]]
+      logrank = survdiff(Surv(Met_Time, Mets) ~ Comparison, data = subset(data, Breslow_Depth >=1))
+      pval = logrank$pvalue
+      if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) < (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+        side <- "low"
+      }
+      if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) > (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+        side <- "high"
+      }
+      if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) == (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+      risk <- NA
+      }
+      # if (length(logrank$obs) == 3){
+      #     side <- "high" 
+      #     }
+      # if (length(logrank$obs) == 4){
+      #     if (((logrank$obs[[1]])/nrow(subset(low_risk, Comparison == "C" & breslow_class == "high"))) > ((logrank$obs[[3]])/nrow(subset(low_risk, Comparison == "NC" & breslow_class == "high")))){
+      #       side <- "high"
+      #     }
+      #     if (((logrank$obs[[1]])/nrow(subset(low_risk, Comparison == "C" & breslow_class == "high"))) < ((logrank$obs[[3]])/nrow(subset(low_risk, Comparison == "NC" & breslow_class == "high")))){
+      #       side <- "low"
+      #     }
+      #     if (((logrank$obs[[1]]+logrank$obs[[2]])/nrow(subset(low_risk, Comparison == "C"))) == ((logrank$obs[[3]]+logrank$obs[[4]])/nrow(subset(low_risk, Comparison == "NC")))){
+      #     side <- NA
+      #     }
+      #   }
+      
+      if (risk_table[risk_table$Cluster == lr_clusters[[i]], "pval"] < 0.05 & pval < 0.05){
+        sig <- "S"
+      }
+      if (!is.na(pval) & pval >= 0.05){
+      sig <- "NS"
+      }
+      row <- data.frame("Risk" = "LR", "Side" = side, "Significance" = sig, "Cluster" = lr_clusters[i], pval)
+      }else{
+        row = data.frame("Risk" = "LR", "Side" = NA, "Significance" = NA, "Cluster" = lr_clusters[i], pval = NA)
+      }
+      lr_sig = rbind(lr_sig, row)
+      }
+  
+    high_risk = subset(data, data$Group %in% subset(risk_table, Risk == "HR")$Cluster)
+    hr_clusters = subset(risk_table, Risk == "HR")$Cluster
+    hr_sig = c()
+    
+    for (i in 1:length(hr_clusters)){
+      data$Comparison <- NA
+      data$Comparison[data$Group != hr_clusters[i]] <- "NC"
+      data$Comparison[data$Group == hr_clusters[i]] <- "C"
+      if (length(unique(data$Comparison)) > 1){
+      logrank <- survdiff(Surv(Met_Time, Mets) ~ Comparison, data = data)
+      pval <- logrank$pvalue
+      if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) > (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+        side <- "high"
+      }
+      if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) < (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+      side <- "low"
+      }
+      if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) == (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+      risk <- NA
+      }
+      if (pval < 0.05){
+        sig <- "S"
+      }
+      if (pval >= 0.05){
+      sig <- "NS"
+      }
+      row <- data.frame("Risk" = "HR", "Side" = side, "Significance" = sig, "Cluster" = hr_clusters[i], pval)
+      }
+      else{
+        row = data.frame("Risk" = "HR", "Side" = "NA", "Significance" = "NA", "Cluster" = hr_clusters[i], pval = "NA")
+      }
+      hr_sig = rbind(hr_sig, row)
+      }
+    return(rbind(lr_sig,hr_sig))
+}
+
+calc_sig_MSS <- function(data, index){
+  risk_table = NULL
+  for (i in 1:index){
+    data$Comparison <- NA
+    data$Comparison[data$Group != unique(data$Group)[i]] <- "NC"
+    data$Comparison[data$Group == unique(data$Group)[i]] <- "C"
+    if (length(unique(data$Comparison)) > 1){
+    logrank <- survdiff(Surv(MSS_Time, MSS) ~ Comparison, data = data)
+    pval <- logrank$pvalue
+    if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) > (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+      risk <- "HR"
+    }
+    if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) < (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+    risk <- "LR"
+    }
+    if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) == (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+    risk <- NA
+    }
+    if (!is.na(pval) & pval < 0.05){
+        sig <- "S"
+      }
+    if (!is.na(pval) & pval >= 0.05){
+        sig <- "NS"
+      }
+    row = data.frame("Risk" = risk, "Cluster" = unique(data$Group)[i], "Significance" = sig, "pval" = pval)
+    risk_table = rbind(risk_table, row)
+    }
+  }
+
+    lr_clusters = subset(risk_table, Risk == "LR")$Cluster
+    low_risk = subset(data, data$Group %in% lr_clusters)
+    lr_sig = c()
+
+    for (i in 1:length(lr_clusters)){
+      low_risk$Comparison <- NA
+      low_risk$Comparison[low_risk$Group != lr_clusters[i]] <- "NC"
+      low_risk$Comparison[low_risk$Group == lr_clusters[i]] <- "C"
+      
+      low_risk$high_feat = NA
+      low_risk$high_feat[low_risk$Ulceration == 1 & low_risk$Breslow_Depth >= 1] = "high"
+      low_risk$high_feat[low_risk$Ulceration == 0 & low_risk$Breslow_Depth < 1] = "low"
+      
+
+      if (length(unique(data$Comparison)) > 1 & length(unique(data$MSS))>1){
+      logrank_pair <- pairwise_survdiff(Surv(MSS_Time, MSS) ~ Comparison + high_feat, data = low_risk)
+      pval_c = logrank_pair$p.value[[1]]
+      pval_nc = logrank_pair$p.value[[2]]
+      
+      logrank = survdiff(Surv(MSS_Time, MSS) ~ Comparison, data = subset(low_risk, Breslow_Depth >=1))
+      pval = logrank$pvalue
+      logrank$n[[1]]
+      if ((logrank$obs[[1]]/logrank$n[[1]]) < (logrank$obs[[2]]/logrank$n[[2]])){
+        side <- "low"
+      }
+      if ((logrank$obs[[1]]/logrank$n[[1]]) > (logrank$obs[[2]]/logrank$n[[2]])){
+        side <- "high"
+      }
+
+      if ((logrank$obs[[1]]/logrank$n[[1]]) == (logrank$obs[[2]]/logrank$n[[2]])){
+      side <- NA
+      }
+      # if (length(logrank$obs) == 3){
+      #     side <- "high"
+      #     }
+      # if (length(logrank$obs) == 4){
+      #     if (((logrank$obs[[1]])/nrow(subset(low_risk, Comparison == "C" & breslow_class == "high"))) > ((logrank$obs[[3]])/nrow(subset(low_risk, Comparison == "NC" & breslow_class == "high")))){
+      #       side <- "high"
+      #     }
+      #     if (((logrank$obs[[1]])/nrow(subset(low_risk, Comparison == "C" & breslow_class == "high"))) < ((logrank$obs[[3]])/nrow(subset(low_risk, Comparison == "NC" & breslow_class == "high")))){
+      #       side <- "low"
+      #     }
+      #     if (((logrank$obs[[1]]+logrank$obs[[2]])/nrow(subset(low_risk, Comparison == "C"))) == ((logrank$obs[[3]]+logrank$obs[[4]])/nrow(subset(low_risk, Comparison == "NC")))){
+      #     side <- NA
+      #     }
+      #   }
+      
+      ifelse(risk_table[risk_table$Cluster == lr_clusters[[i]], "pval"] < 0.05 & pval_c > 0.05 & pval_nc < 0.05, sig <- "S", sig <- "NS")
+      
+      row <- data.frame("Risk" = "LR", "Side" = side, "Significance" = sig, "Cluster" = lr_clusters[i], pval)
+      }
+      else{
+        row = data.frame("Risk" = "LR", "Side" = NA, "Significance" = NA, "Cluster" = lr_clusters[i], pval = NA)
+      }
+      
+      lr_sig = rbind(lr_sig, row)
+      }
+
+
+    high_risk = subset(data, data$Group %in% subset(risk_table, Risk == "HR")$Cluster)
+    hr_clusters = subset(risk_table, Risk == "HR")$Cluster
+    hr_sig = c()
+
+    for (i in 1:length(hr_clusters)){
+      high_risk$Comparison <- NA
+      high_risk$Comparison[high_risk$Group != hr_clusters[i]] <- "NC"
+      high_risk$Comparison[high_risk$Group == hr_clusters[i]] <- "C"
+      if (length(unique(high_risk$Comparison)) > 1){
+      logrank <- survdiff(Surv(MSS_Time, MSS) ~ Comparison, data = high_risk)
+      pval <- logrank$pvalue
+      
+      if ((logrank$obs[[1]]/logrank$n[[1]]) > (logrank$obs[[2]]/logrank$n[[2]])){
+        side <- "high"
+      }
+      if ((logrank$obs[[1]]/logrank$n[[1]]) < (logrank$obs[[2]]/logrank$n[[2]])){
+      side <- "low"
+      }
+      if ((logrank$obs[[1]]/logrank$n[[1]]) == (logrank$obs[[2]]/logrank$n[[2]])){
+      risk <- NA
+      }
+      if (pval < 0.05){
+        sig <- "S"
+      }
+      if (pval >= 0.05){
+      sig <- "NS"
+      }
+      row <- data.frame("Risk" = "HR", "Side" = side, "Significance" = sig, "Cluster" = hr_clusters[i], pval)
+      }else{
+        row = data.frame("Risk" = "HR", "Side" = "NA", "Significance" = "NA", "Cluster" = hr_clusters[i], pval = "NA")
+      }
+      hr_sig = rbind(hr_sig, row)
+      }
+    return(rbind(lr_sig,hr_sig))
+}
+
+calc_sig_orig <- function(i, data){
+  
+  data$Comparison <- NA
+  data$Comparison[data$Group != i] <- "NC"
+  data$Comparison[data$Group == i] <- "C"
+  if (length(unique(data$Comparison)) > 1){
+  logrank <- survdiff(Surv(MSS_Time, MSS) ~ Comparison, data = data)
+  pval <- logrank$pvalue
+  if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) > (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+    risk <- "HR"
+  }
+  if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) < (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+  risk <- "LR"
+  }
+  if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) == (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+  risk <- NA
+  }
+  if (pval < 0.05){
+    sig <- "S"
+  }
+  if (pval >= 0.05){
+  sig <- "NS"
+  }
+  if (logrank$obs[[1]] == 0){
+    z <- 1
+  }
+    if (logrank$obs[[1]] > 0){
+    z <- 0
+  }
+  row <- data.frame("Risk" = risk, "Significance" = sig, "Cluster" = i, "Z" = z)
+  return(row)
+  }
+}
+```
+
+```{r}
+risk_sig <- function(i, data){
+  data$Comparison <- NA
+  data$Comparison[data$Group != i] <- "NC"
+  data$Comparison[data$Group == i] <- "C"
+  if (length(unique(data$Comparison)) > 1){
+  logrank <- survdiff(Surv(Met_Time, Mets) ~ Comparison, data = data)
+  pval <- logrank$pvalue
+  
+  if (pval < 0.05){
+    sig <- "S"
+  }
+  if (pval >= 0.05){
+  sig <- "NS"
+  }
+  row <- data.frame("Risk" = risk, "Significance" = sig, "Cluster" = i)
+  return(row)
+  }
+}
+
+risk_class_gmm = function(data, cluster_sig){
+  data$Risk = 1
+
+  high_risk = subset(data, data$Group %in% subset(cluster_sig, Risk == "HR" & Significance == "S" & Side == "high")$Cluster)
+  low_risk = subset(data, data$Group %in% subset(cluster_sig, Risk == "LR" & Significance == "S" & Side == "low")$Cluster)
+  low_risk_clusters = (low_risk %>%
+      mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+      mutate(Breslow_Depth = ifelse(Breslow_Depth > 1, "High", "Low")) %>%
+      count(Group, Mets, Breslow_Depth) %>%
+      group_by(Group, Breslow_Depth) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      group_by(Group) %>%
+      reframe(N, ratio = p[Mets == "Alive" & Breslow_Depth == "High"]/p[Mets == "Alive" & Breslow_Depth == "Low"]) %>%
+      slice_max(ratio, n = 2) %>%
+      slice_max(N, n = 2))$Group 
+
+      #slice_max(ratio, n = 1))$Group
+
+  high_risk_clusters = (high_risk %>%
+    mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+    count(Group, Mets) %>%
+    group_by(Group) %>%
+    mutate(N = sum(n), p = 100*n/N) %>%
+    filter(Mets == "Dead") %>%
+    filter(p>25))$Group
+
+  data$Risk[data$Group %in% high_risk_clusters] = 2
+  data$Risk[data$Group %in% low_risk_clusters] = 0
+  return(data)
+}
+
+risk_class_gmm_MSS = function(data, cluster_sig){
+  data$Risk = 1
+
+  high_risk = subset(data, data$Group %in% subset(cluster_sig, Risk == "HR" & Significance == "S" & Side == "high")$Cluster)
+  low_risk = subset(data, data$Group %in% subset(cluster_sig, Risk == "LR" & Significance == "S" & Side == "low")$Cluster)
+  low_risk_clusters = (low_risk %>%
+      mutate(MSS = if_else(MSS == 1, "Dead", "Alive")) %>%
+      mutate(Breslow_Depth = if_else(Breslow_Depth > 1, "High", "Low")) %>%
+      count(Group, MSS, Breslow_Depth) %>%
+      group_by(Group, Breslow_Depth) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      group_by(Group) %>%
+      reframe(ratio = p[MSS == "Alive" & Breslow_Depth == "High"]/p[MSS == "Alive" & Breslow_Depth == "Low"]) %>%
+      filter(ratio > 0.9))$Group
+    #%>%
+      # slice_max(ratio, n = 2) %>%
+      # slice_max(N, n = 2))$Group 
+
+      #slice_max(ratio, n = 1))$Group
+
+  high_risk_clusters = (high_risk %>%
+    mutate(MSS = if_else(MSS == 1, "Dead", "Alive")) %>%
+    count(Group, MSS) %>%
+    group_by(Group) %>%
+    mutate(N = sum(n), p = 100*n/N) %>%
+    filter(MSS == "Dead") %>%
+    filter(p>25))$Group
+
+  data$Risk[data$Group %in% high_risk_clusters] = 2
+  data$Risk[data$Group %in% low_risk_clusters] = 0
+  return(data)
+}
+risk_class = function(data, cluster_sig){
+  data$Risk = 1
+  
+  if (length(subset(cluster_sig, Risk == "HR")$Cluster) > 1){
+   high_risk_clusters = subset(cluster_sig, Risk == "HR" & Significance == "S" & Side == "high")$Cluster
+  }
+  else{
+    high_risk_clusters = subset(cluster_sig, Risk == "HR")$Cluster
+  }
+  
+  if (length(subset(cluster_sig, Risk == "LR")$Cluster) > 1){
+    low_risk_clusters = subset(cluster_sig, Risk == "LR" & Significance == "S" & Side == "low")$Cluster
+  }
+  else{
+    low_risk_clusters = subset(cluster_sig, Risk == "LR")
+  }
+  
+  data$Risk[data$Group %in% high_risk_clusters] = 2
+  data$Risk[data$Group %in% low_risk_clusters] = 0
+  return(data)
+}
+
+```
+
+using GMM
+```{r}
+set.seed(1)
+data = read.csv("C://PhD work//Melanoma-ClinPath-Model//Final Analysis - JAAD Submission//Datasets//SEER_final.csv")
+data = data[,-c(1,18)]
+
+preProcValues <- preProcess(data, method = c("center", "scale"))
+data.ml = predict(preProcValues, data)
+
+opt_gmm = Optimal_Clusters_GMM(data.ml, max_clusters = 50, criterion = "BIC",
+
+                              dist_mode = "maha_dist", seed_mode = "random_subset",
+
+                              km_iter = 100, em_iter = 100, var_floor = 1e-10,
+
+                              plot_data = F)
+plot(1:50, opt_gmm)
+
+
+diff_list = c()
+for (i in 1:(length(opt_gmm)-3)){
+  gmm_diff = (opt_gmm[i+3] - opt_gmm[i])/opt_gmm[i]
+  diff_list = c(diff_list, gmm_diff)
+}
+
+index = which(diff_list < 0.10)[[2]]
+#index = 25
+gmm = GMM(data.ml, index, dist_mode = "maha_dist", seed_mode = "random_subset", km_iter = 500,
+          em_iter = 100, verbose = F)   
+ 
+
+pr = predict(gmm, newdata = data.ml)
+
+data$Group <- as.factor(pr)
+data.ml$Group = as.factor(pr)
+
+data2 <- calc_sig_MSS(data, index)
+
+high_risk = subset(data, data$Group %in% subset(data2, Risk == "HR" & Significance == "S" & Side == "high")$Cluster)
+
+data %>%
+      mutate(MSS = if_else(MSS == 1, "Dead", "Alive")) %>%
+      count(Group, MSS) %>%
+      group_by(Group) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      filter(MSS == "Dead") %>%
+      ggplot(aes(x = fct_reorder(Group, p, .desc = TRUE), y = p))+
+      geom_col()
+
+high_risk %>%
+      mutate(MSS = if_else(MSS == 1, "Dead", "Alive")) %>%
+      count(Group, MSS)
+    
+low_risk = subset(data, data$Group %in% subset(data2, Risk == "LR" & Significance == "S" & Side == "low")$Cluster)
+
+low_risk %>%
+      mutate(MSS = if_else(MSS == 1, "Dead", "Alive")) %>%
+      mutate(Breslow_Depth = if_else(Breslow_Depth > 1, "High", "Low")) %>%
+      count(Group, MSS, Breslow_Depth) %>%
+      group_by(Group, Breslow_Depth) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      group_by(Group) %>%
+      reframe(ratio = p[MSS == "Alive" & Breslow_Depth == "High"]/p[MSS == "Alive" & Breslow_Depth == "Low"]) %>%
+      filter(ratio > 0.9)
+
+risk_data = risk_class(data, data2)
+risk_gmm = risk_data$Risk
+
+table(risk_data$Risk)
+
+sum(risk_data$MSS)
+sum(risk_data[risk_data$Risk == 2,]$MSS)
+sum(risk_data[risk_data$Risk == 1,]$MSS)
+sum(risk_data[risk_data$Risk == 0,]$MSS)
+
+```
+
+```{r}
+set.seed(1)
+
+inTraining = createDataPartition(data.ml$Age, p = 0.8, list = FALSE)
+train_data = data.ml[inTraining,]
+test_data = data.ml[-inTraining,]
+fitControl = trainControl(method = "boot", number = 5)
+
+nn_model = train(Group~., data = train_data, method = "nnet",trControl = fitControl, tuneGrid = expand.grid(size = c(1,5,10), decay = c(0,0.001,0.1)), verbose = F)
+forest_model = train(Group~., data = train_data, method = "rf", trControl = fitControl, tuneGrid = expand.grid(.mtry = c(2:4)))
+svm_model = train(Group~., data = train_data, method = "lssvmRadial", trControl = fitControl)
+xgb_model = train(Group~., data = train_data, method = "xgbLinear", trControl = fitControl, tuneGrid = expand.grid(nrounds = 300, eta = c(0.01, 0.1, 1), alpha = c(0, 1, 10), lambda = c(0, 1, 10)))
+knn_model = train(Group~., data = train_data, method = "knn", trControl = fitControl, tuneGrid = expand.grid(k = c(5,10,15,20,25,30,35,40,45,50)))
+
+
+nn_pred = predict(nn_model, newdata = test_data)
+forest_pred = predict(forest_model, newdata = test_data)
+svm_pred = predict(svm_model, newdata = test_data)
+xgb_pred = predict(xgb_model, newdata = test_data)
+knn_pred = predict(knn_model, newdata = test_data)
+
+caret::confusionMatrix(as.factor(nn_pred), as.factor(test_data$Group))
+caret::confusionMatrix(as.factor(forest_pred), as.factor(test_data$Group))
+caret::confusionMatrix(as.factor(svm_pred), as.factor(test_data$Group))
+caret::confusionMatrix(as.factor(xgb_pred), as.factor(test_data$Group))
+caret::confusionMatrix(as.factor(knn_pred), as.factor(test_data$Group))
+
+
+#forest_model = randomForest(Group~., data = data.ml, mtry = 4, ntree = 500, sampsize = floor(nrow(data.ml)*0.8), replace = TRUE)
+
+#forest_pred = predict(forest_model, newdata = data)
+#caret::confusionMatrix(as.factor(forest_pred), as.factor(data$Group))
+
+```
+
+
+```{r}
+logrank = survdiff(Surv(MSS_Time, MSS) ~ Risk, data = risk_data) 
+pval = expression("italic(p) < 0.0001")
+fit = survfit(Surv(MSS_Time, MSS) ~ Risk, data = risk_data)
+
+SEER_risk = ggsurvplot(fit = fit, data = risk_data, censor.size = 1)$plot
+SEER_risk <- SEER_risk +
+  ggtitle("SEER Survival by Risk Strata") +
+    theme_bw() +
+    xlab("Months") +
+    ylab("Survival Probability")+
+  scale_color_manual(values = c("#00CC66","#26C6DA", "#ef5350")) +
+  annotate(geom="text", x=25, y=0.2, label = pval, parse = TRUE,
+              color="black", size = 8) +
+  theme(legend.position = "right", plot.title=element_text(hjust=0.5, family = "serif", size = 24), axis.title = element_text(family = "serif", size = 24), axis.text = element_text(family = "serif", size = 22))
+SEER_risk
+```
+
+```{r}
+
+```
+

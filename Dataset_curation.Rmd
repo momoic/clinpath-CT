@@ -14,56 +14,89 @@ library(xlsx)
 library(tidyr)
 library(dplyr)
 library(stringr)
-clinical = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_clinical.csv")
-meds = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_meds.csv")
-orders = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_orders.csv")
-PMH = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_PMH.csv")
-treatment = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_treatment.csv")
+clinical = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_clinical.csv")
+meds = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_meds.csv")
+orders = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_orders.csv")
+PMH = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_PMH.csv")
+treatment = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_treatment.csv")
+BMI = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_BMI.csv")
+histo = ht = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_histo.csv")
+
+old_2025 = ht = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_clinical.csv")
 
 clinical_2023 = read.csv("C://PhD work//clinpath_CT//2023_roswell//De_ID_DTA_BDR_171523_Melanoma_20230801 CDE.csv")
 
-ht.wt = read.csv("C://PhD work//clinpath_CT//2023_roswell//De_ID_DTA_BDR_171523_Melanoma_20230801 Height Weight.csv")
-BMI = read.csv("C://PhD work//clinpath_CT//2023_roswell//De_ID_DTA_BDR_171523_Melanoma_20230801 BMI.csv")
-histo = read.csv("C://PhD work//clinpath_CT//2023_roswell//De_ID_DTA_BDR_171523_Melanoma_20230801 histo.csv")
 ```
+
 
 ```{r}
 clinical = merge(clinical, histo, by = "Tumor.Number")
 colnames(clinical)[[2]] = "PT.ID"
 ```
 
+stage, 824 disagree between clin and path
+```{r}
+clinical %>%
+  dplyr::select(PT.ID, tnmClinStageGroup, tnmPathStageGroup, ajcctnmClinStageGroup, ajcctnmPathStageGroup) %>%
+  rename(tc = tnmClinStageGroup , tp = tnmPathStageGroup, ac = ajcctnmClinStageGroup,ap = ajcctnmPathStageGroup) %>%
+  filter(!((tc == 99 & tp == 99)|(ac == 99 & ap == 99)|(tc == 88 & tp == 88)|(ac == 88 & ap == 88))) %>%
+  mutate(tc = ifelse(tc == 99|tc == 88, tp, tc)) %>%
+  mutate(tp = ifelse(tp == 99|tp == 88, tc, tp)) %>%
+  mutate(ac = ifelse(ac == 99|ac == 88, ap, ac)) %>%
+  mutate(ap = ifelse(ap == 99|ap == 88, ac, ap)) %>%
+  mutate(clin = ifelse(tc == "", ac, tc)) %>%
+  mutate(path = ifelse(tp == "", ap, tp)) %>%
+  mutate(stage = ifelse(path == "", clin, ifelse(clin == path, clin, path))) %>%
+  mutate(stage = str_replace(stage, "IV", "4")) %>%
+  mutate(stage = str_replace(stage, "III", "3")) %>%
+  mutate(stage = str_replace(stage, "II", "2")) %>%
+  mutate(stage = str_replace(stage, "I", "1")) %>%
+  group_by(stage) %>%
+  summarize(count = n())
+
+```
+
 
 Height and Weight data curation
 ```{r}
 #take only the first measurements of height and weight, filter out entries that only have a weight measurement without the height
-ht.wt = ht.wt %>%
+ht = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_ht.csv")
+wt = read.csv("C://PhD work//clinpath_CT//2025_roswell//DeID_DTA_BDR_171523_Paragh_Melanoma_Update_20251002_wt.csv")
+
+pt_dx_year = clinical[c("PT.ID", "Year.of.Dx")]
+ht = subset(ht, ht$PT.ID %in% pt_dx_year$PT.ID)
+wt = subset(wt, wt$PT.ID %in% pt_dx_year$PT.ID)
+
+ht = na.omit(merge(ht, pt_dx_year, by = "PT.ID"))
+wt = na.omit(merge(wt, pt_dx_year, by = "PT.ID"))
+
+ht = ht %>%
+  filter(ValueText <500 & ValueText >100) %>%
+  mutate(year_diff = abs(Year.of.Measurement - Year.of.Dx)) %>%
   group_by(PT.ID) %>%
-  distinct(Description, .keep_all = TRUE) %>%
-  ungroup(PT.ID) 
-
-pt_ids = ht.wt %>%
-  group_by(Description) %>%
-  mutate(i1=row_number()) %>%
+  slice_min(year_diff, n = 1) %>%
   group_by(PT.ID) %>%
-  summarize(count = n()) %>%
-  filter(count > 1) %>%
-  pull(PT.ID)
+  summarize(final_ht = median(ValueText))
 
-ht.wt_row = ht.wt %>%
-  filter(PT.ID %in% pt_ids) %>%
-  dplyr::select(!Dx.Date.to.Measurement.Date..Days.) %>%
-  dplyr::select(!PT.ID) %>%
-  group_by(Description) %>%
-  mutate(i1=row_number()) %>%
-  spread(Description, Value) %>%
-  dplyr::select(!i1)
+wt = wt %>%
+  filter(ValueText <500 & ValueText > 20) %>%
+  mutate(year_diff = abs(Year.of.Measurement - Year.of.Dx)) %>%
+  group_by(PT.ID) %>%
+  filter(between(year_diff, min(year_diff)-1, min(year_diff)+1)) %>%
+  group_by(PT.ID) %>%
+  mutate(median_wt = median(ValueText)) %>%
+  mutate(sd = sd(ValueText)) %>%
+  group_by(PT.ID) %>%
+  mutate(count = n()) %>%
+  group_by(PT.ID) %>%
+  mutate(final = if_else(count == 2 & sd > 20, min(ValueText), median_wt)) %>%
+  group_by(PT.ID) %>%
+  summarize(final_wt = mean(final))
 
-ht.wt_row$PT.ID = pt_ids
-ht.wt_row$Height = as.numeric(ht.wt_row$Height)
-ht.wt_row$Weight = as.numeric(ht.wt_row$Weight)
-ht.wt_row = na.omit(ht.wt_row)
-ht.wt_row = ht.wt_row[,c("PT.ID", "Height", "Weight")]
 
+ht.wt = full_join(ht, wt, join_by(PT.ID))
+
+ht.wt_row = na.omit(ht.wt)
 ```
 
 BMI curation
@@ -105,10 +138,10 @@ clinical$Desmoplastic[clinical$HistologyDescription.x == grep("desmoplastic", hi
 clinical$Lentigo_Maligna <- 0
 clinical$Lentigo_Maligna[clinical$HistologyDescription.x == grep("lentigo maligna", histo_desc, ignore.case = TRUE, value = TRUE)] <- 1
 
-#clinical$Acral_Lentiginous <- 0
-#clinical$Acral_Lentiginous[clinical$HistologyDescription.x == grep("lentigo", histo_desc, ignore.case = TRUE, value = TRUE)] <- 1
+clinical$Acral_Lentiginous <- 0
+clinical$Acral_Lentiginous[clinical$HistologyDescription.x == grep("acral", histo_desc, ignore.case = TRUE, value = TRUE)] <- 1
 
-clinical <- subset(clinical, Superficial_Spreading == 1 | Nodular == 1 | Desmoplastic == 1 | Lentigo_Maligna == 1)
+clinical <- subset(clinical, Superficial_Spreading == 1 | Nodular == 1 | Desmoplastic == 1 | Lentigo_Maligna == 1 | Acral_Lentiginous == 1)
 ```
 
 4915 patients after selecting for areas of skin to analyze
@@ -154,19 +187,23 @@ clinical = merge(ht.wt_row, clinical, by = "PT.ID")
 ```
 
 ```{r}
-rm_depths = c("Microinvasion; microscopic focus or foci only and no depth given", "   ", "No mass/tumor found", "", "888","Not applicable: Information not collected for this schema", "", ""    )
+rm_depths = c("Microinvasion; microscopic focus or foci only and no depth given", "   ", "No mass/tumor found", "", "888","Not applicable: Information not collected for this schema", "", "", "Microinvasion; microscopic focus or foci only and no depth given Not documented in patient record Unknown; depth not stated.")
+
+clinical$Breslow.Depth = clinical$Breslow.Thickness..CS.Site.Specific.Factor.1.
 
 for (i in nrow(clinical)) {
   clinical$Breslow.Depth[i] = gsub("^[[:space:]]*", "", clinical$Breslow.Depth[i])
 }
 
 clinical$Breslow.Depth[clinical$Breslow.Depth %in% rm_depths] = NA
-clinical$Breslow.Depth[clinical$Breslow.Depth == "≥9.80 mm"] = 9.80
-
 clinical = clinical %>%
-  mutate(Breslow.Depth = str_sub(Breslow.Depth, 1, nchar(Breslow.Depth) - 3))
+  mutate(Breslow.Depth = as.numeric(Breslow.Depth)/100)
 
-clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. %in% c("", "Microinvasion; microscopic focus or foci only and no depth given", " ")] <- NA
+clinical$Breslow.Thickness..mm. = clinical$Breslow.Tumor.Thickness
+clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. %in% c("", "Microinvasion; microscopic focus or foci only and no depth given", " ", "XX.9", "AX.0" )] <- NA
+
+clinical$Breslow.Thickness..mm.[grepl("^A", clinical$Breslow.Thickness..mm., ignore.case = TRUE)] = NA
+
 
 clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == ">9.9 mm"] <- "9.9"
 clinical$Breslow.Thickness..mm.[clinical$Breslow.Thickness..mm. == "At least 0.7 mm"] <- "0.7"
@@ -223,8 +260,10 @@ for (i in 1:nrow(clinical)){
 }
 clinical$Breslow_Depth <- unlist(bd)
 
-rm_ulc = c("", " ", "Not documented in medical record")
-rm_ulc_stat = c("", "   ", "Unknown or no information present", "888", "030", "Not applicable: information not collected for this case")
+rm_ulc = c("", " ", "Not documented in medical record", "Unknown or no information; Not documented in patient record", "Unknown or no information; Not documented in patient record.", "Not documented in medical record Cannot be determined by the pathologist Pathology report does not mention ulceration Ulceration not assessed or unknown if assessed", "Unknown or no infromation. Not documented in patient record.")
+rm_ulc_stat = c("", "   ", "Unknown or no information present", "888", "030", "Not applicable: information not collected for this case", "Unknown or no information; Not documented in patient record", "Unknown or no information; Not documented in patient record.", "Unknown or no infromation. Not documented in patient record.")
+
+clinical$Ulceration.Status = clinical$Ulceration..CS.Site.Specific.Factor.2. 
 
 clinical$Ulceration[clinical$Ulceration %in% rm_ulc] = NA 
 clinical$Ulceration.Status[clinical$Ulceration.Status %in% rm_ulc_stat] = NA 
@@ -252,7 +291,13 @@ clinical$Ulceration <- unlist(ulc)
 ```
 
 ```{r}
-clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. %in% c("", "Not documented in medical record", " ", "Stated as \"less than 1 mitosis/square mm\"", " Stated as \"at least 1 mitosis/square mm\"")] <- NA
+clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. = clinical$Mitotic.Rate
+
+clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. %in% c("", "Not documented in medical record", " ", "Stated as \"less than 1 mitosis/square mm\"", " Stated as \"at least 1 mitosis/square mm\"", "Not documented in medical record Mitotic Rate Melanoma not assessed or unknown if assessed", "Stated as \"less than 1 mitosis/square mm\" Stated as \"nonmitogenic\"", "Stated as \"at least 1 mitosis/square mm\"\nStated as \"mitogenic\"", "")] <- NA
+
+
+clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. == "0 mitoses per square millimeter (mm)\nMitoses absent\nNo mitoses present"] <- "0 mitoses/square mm"
+
 
 new.mr <- c()
 for (i in 1:nrow(clinical)){
@@ -260,25 +305,28 @@ for (i in 1:nrow(clinical)){
   new.mr <- c(new.mr, new)
 }
 
-
 clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. <- unlist(new.mr)
 
 clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi.[clinical$MitoticRateMelano..vw_metriq_cde_ssf_ssdi. == "04"] <- 4
 
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate %in% c("Not applicable: Information not collected for this case", "", "Unknown or no information", "Stated as \"less than 1 mitosis/square mm\"", "Unknown or no information", "888", "No histologic examination of primary site.", "014", "Mitotic rate described with denominator other than square millimeter (mm)")] <- NA
+clinical$Primary.Tumor.Mitotic.Count.Rate = clinical$Primary.Tumor.Mitotic.Count.Rate..CS.Site.Specific.Factor.7. 
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate %in% c("Not applicable: Information not collected for this case", "", "Unknown or no information", "Stated as \"less than 1 mitosis/square mm\"", "Unknown or no information", "888", "No histologic examination of primary site.", "014", "Mitotic rate described with denominator other than square millimeter (mm)", "Stated as \"less than 1 mitosis/square mm\" Stated as \"nonmitogenic\".", "Unknown", "Unknown or no information Not documented in patient record.", "", "Not applicable: Information not collected for this case.", "Unknown", " ", "")] <- NA
 
+
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "0 mitoses per square millimeter (mm) Mitoses absent No mitoses present."] <- 0
 clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "0 mitoses per square millimeter (mm)"] <- 0
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "1 mitosis per square mm"] <- 1
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "2 mitoses per square mm"] <- 2
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "3 mitoses per square mm"] <- 3
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "4 mitoses per square mm"] <- 4
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "5 mitoses per square mm"] <- 5
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "6 mitoses per square mm"] <- 6
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "7 mitoses per square mm"] <- 7
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "8 mitoses per square mm"] <- 8
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "9 mitoses per square mm"] <- 9
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "10 mitoses per square mm"] <- 10
-clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "11 or more mitoses per square mm"] <- 11
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "1 mitosis/square mm"] <- 1
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "2 mitoses/square mm"] <- 2
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "3 mitoses/square mm"] <- 3
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "4 mitoses/square mm"] <- 4
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "5 mitoses/square mm"] <- 5
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "6 mitoses/square mm"] <- 6
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "7 mitoses/square mm"] <- 7
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "8 mitoses/square mm"] <- 8
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "9 mitoses/square mm"] <- 9
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "10 mitoses/square mm"] <- 10
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "11 or more mitoses per square mm"|clinical$Primary.Tumor.Mitotic.Count.Rate == "11 or more mitoses per square mm."] <- 11
+clinical$Primary.Tumor.Mitotic.Count.Rate[clinical$Primary.Tumor.Mitotic.Count.Rate == "14 mitoses/square mm"] <- 14
 
 clinical <- subset(clinical, is.na(Primary.Tumor.Mitotic.Count.Rate) == FALSE | is.na(MitoticRateMelano..vw_metriq_cde_ssf_ssdi.) == FALSE)
 
@@ -293,13 +341,39 @@ for (i in 1:nrow(clinical)){
   }
   mr <- c(mr, rate)
 }
+
+
 clinical$Mitotic_Rate <- unlist(mr)
+```
+
+AJCC staging, keep only localized
+```{r}
+localized = c("1A", "1B", "2A", "2B", "2C")
+localized_pts = (clinical %>%
+  dplyr::select(PT.ID, tnmClinStageGroup, tnmPathStageGroup, ajcctnmClinStageGroup, ajcctnmPathStageGroup) %>%
+  rename(tc = tnmClinStageGroup , tp = tnmPathStageGroup, ac = ajcctnmClinStageGroup,ap = ajcctnmPathStageGroup) %>%
+  filter(!((tc == 99 & tp == 99)|(ac == 99 & ap == 99)|(tc == 88 & tp == 88)|(ac == 88 & ap == 88))) %>%
+  mutate(tc = ifelse(tc == 99|tc == 88, tp, tc)) %>%
+  mutate(tp = ifelse(tp == 99|tp == 88, tc, tp)) %>%
+  mutate(ac = ifelse(ac == 99|ac == 88, ap, ac)) %>%
+  mutate(ap = ifelse(ap == 99|ap == 88, ac, ap)) %>%
+  mutate(clin = ifelse(tc == "", ac, tc)) %>%
+  mutate(path = ifelse(tp == "", ap, tp)) %>%
+  mutate(stage = ifelse(path == "", clin, ifelse(clin == path, clin, path))) %>%
+  mutate(stage = str_replace(stage, "IV", "4")) %>%
+  mutate(stage = str_replace(stage, "III", "3")) %>%
+  mutate(stage = str_replace(stage, "II", "2")) %>%
+  mutate(stage = str_replace(stage, "I", "1")) %>%
+  filter(stage %in% localized))$PT.ID
+
+clinical = subset(clinical, clinical$PT.ID %in% localized_pts)
 ```
 
 ```{r}
 clinical$MSS = 0
-clinical$MSS[clinical$DeathCauseDescription == "Dead From This CA or Complications of CA"] <- 1
-clinical$MSS_Time = clinical$Overall.Survival.Time..Months.
+clinical$MSS[clinical$CauseOfDeath == "Dead From This CA or Complications of CA"] <- 1
+clinical$Overall.Survival..Months.[clinical$Overall.Survival..Months. == "Exact time unknown"] = NA
+clinical$MSS_Time = clinical$Overall.Survival..Months.
 ```
 
 ```{r}
@@ -312,9 +386,10 @@ clinical$Mets[clinical$X1stRecurrenceTypeDescription == "Patient became disease-
 
 clinical$Mets[clinical$X1stRecurrenceTypeDescription %in% c("Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51–59).", "Recurrence of an invasive tumor in regional lymph nodes only.", "Distant recurrence of an invasive tumor in the lung only. Lung includes the visceral pleura.", "Distant recurrence of an invasive tumor in the CNS only. This includes the brain and spinal cord, but not the external eye.", "Distant recurrence of an invasive tumor in lymph node only. Refer to the staging scheme for a description of lymph nodes that are distant for a particular site.", "Recurrence of an invasive tumor in adjacent tissue or organ(s) and in regional lymph nodes (both 21 and 22) at the same time.", "Distant recurrence, to a site not listed in 46-62 or there is insufficient information available to code to 46–62.", "Distant recurrence of an invasive tumor in liver only ", "Distant recurrence of an invasive tumor in the skin only. This includes skin other than the primary site.", "Distant recurrence of an invasive tumor in bone only. This includes bones other than the primary site.", "Distant recurrence of an invasive tumor in a single distant site (51–58) and local, trocar and/or regional recurrence (10–15, 20–25, or 30).", "Regional recurrence, and there is insufficient information available to code to 21–27.", "Distant recurrence of an invasive tumor in the peritoneum only. Peritoneum includes peritoneal surfaces of all structures within the abdominal cavity and/or positive ascitic fluid.", "Distant systemic recurrence of an invasive tumor only. This includes lymphoma, leukemia, bone marrow metastasis, carcinomatosis, generalized disease.", "Both regional recurrence of an invasive tumor in adjacent tissue or organs(s) and/or regional lymph nodes (20–25) and local and/or trocar recurrence (10, 13, 14, or 15)..", "Distant recurrence of an invasive tumor in the liver only.", "Distant recurrence of an invasive tumor in multiple sites (recurrences that can be coded to more than one category 51-59).", "Distant recurrence and there is insufficient information available to code to 46-62.", "Distant systemic recurrence of an invasive tumor only. This includes leukemia, bone marrow metastasis, carcinomatosis, and generalized disease.", "Regional recurrence, and there is insufficient information available to code to 21-27.", "Distant recurrence of an invasive tumor in a single distant site (51-58) and local, trocar, and/or regional recurrence (10-15, 20-25, or 30).")] <- 1
 
-clinical$Mets[clinical$X1stRecurrenceTypeDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "", "Recurrence of an in situ tumor in adjacent tissue or organ(s) and in regional lymph nodes at the same time.", "Disease has recurred, but the type of recurrence is unknown.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated.", "It is unknown whether the disease has recurred or if the patient was ever disease-free.", "Local recurrence of an invasive tumor.", "Local recurrence and there is insufficient information available to code to 13-17. Recurrence is confined to the remnant of the organ of origin; to the organ of origin; to the anastomosis; or to scar tissue where the organ previously existed.")] <- NA
+clinical$Mets[clinical$X1stRecurrenceTypeDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "", "Recurrence of an in situ tumor in adjacent tissue or organ(s) and in regional lymph nodes at the same time.", "Disease has recurred, but the type of recurrence is unknown.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated.", "It is unknown whether the disease has recurred or if the patient was ever disease-free.", "Local recurrence of an invasive tumor.", "Local recurrence and there is insufficient information available to code to 13-17. Recurrence is confined to the remnant of the organ of origin; to the organ of origin; to the anastomosis; or to scar tissue where the organ previously existed.", "In situ recurrence of an in situ tumor.")] <- NA
 
-      
+#unique(subset(clinical, Mets == 2)$X1stRecurrenceTypeDescription)      
+
 clinical <- subset(clinical, is.na(Mets) == FALSE)
 ```
 
@@ -332,22 +407,32 @@ clinical$node_met[clinical$X1stRecurrenceTypeDescription %in% c("Recurrence of a
 
 clinical$node_met[clinical$X1stRecurrenceTypeDescription %in% c("It is unknown whether the disease has recurred or if the patient was ever disease-free", "Recurrence of an invasive tumor in adjacent tissue or organ(s) only.", "Since diagnosis, patient has never been disease-free. This includes cases with distant metastasis at diagnosis, systemic disease, unknown primary, or minimal disease that is not treated", "Local recurrence, & there is insufficient info available to code to 13-17. Local recurrence includes recurrence confined to remnant of organ of origin, to organ of origin, to anastomosis, or to scar tissue where the organ previously existed.", "Local recurrence of an invasive tumor", "Trocar recurrence of an invasive tumor. Includes recurrence in the trocar path or entrance site following prior surgery.", "In situ recurrence of an invasive tumor", "")] <- NA
 
-unique(clinical[clinical$node_met == 2, c("X1stRecurrenceTypeDescription")])
- 
+#unique(clinical[clinical$node_met == 2, c("X1stRecurrenceTypeDescription")])
+
 clinical <- subset(clinical, is.na(node_met) == FALSE)
 ```
 
 
-6 patients that had multiple melanomas
+75 patients that had multiple melanomas
 
 ```{r}
 remet_pts = (clinical %>%
   group_by(PT.ID) %>%
-  filter(Mets == 1) %>%
   summarize(count = n()) %>%
   filter(count >1))[[1]]
 
 clinical = subset(clinical, !(PT.ID %in% remet_pts))
+```
+
+```{r}
+
+
+nrow(subset(clinical, MSS == 1))
+nrow(subset(clinical, MSS == 0))
+
+MSS_rm = clinical %>%
+  filter(MSS == 0 & as.numeric(Overall.Survival..Months.) < 36)
+clinical = setdiff(clinical, MSS_rm)
 ```
 
 
@@ -355,15 +440,12 @@ clinical = subset(clinical, !(PT.ID %in% remet_pts))
 time <- c()
 
 
-nrow(subset(clinical, Mets == 1))
-nrow(subset(clinical, Mets == 0))
-
 for (i in 1:nrow(clinical)){
   if (clinical$Mets[[i]] == 1){
-    t <- clinical$Time.to.First.Recurrence..Months.[[i]]
+    t <- clinical$Time.to.1st.Recurrence..Months.[[i]]
   }
     if (clinical$Mets[[i]] == 0){
-    t <- clinical$Overall.Survival.Time..Months.[[i]]
+    t <- clinical$Overall.Survival..Months.[[i]]
     }
   time <- c(time, t)
 }
@@ -374,7 +456,7 @@ clinical$Met_Time <- unlist(time)
 
 ```{r}
 clinical = clinical %>%
-  mutate(BMI = Weight/(Height/100)**2)
+  mutate(BMI = final_wt/(final_ht/100)**2)
 
 ```
 
@@ -387,13 +469,14 @@ PMH %>%
 unique(grep("diabetes", PMH$Description, value = TRUE, ignore.case = TRUE))
 #unique(grep("leukemia|lymphoma", PMH$Description, value = TRUE, ignore.case = TRUE))
 unique(grep("vitiligo", PMH$Description, value = TRUE, ignore.case = TRUE))
-#unique(grep("hyperchol*|hyperlip*", PMH$Description, value = TRUE, ignore.case = TRUE))
+unique(grep("hyperchol*|hyperlip*", PMH$Description, value = TRUE, ignore.case = TRUE))
 #unique(grep("myeloma|myelodysplastic|myelopro*|myelofib*", PMH$Description, value = TRUE, ignore.case = TRUE))
 #unique(grep("hypertension", PMH$Description, value = TRUE, ignore.case = TRUE))
 unique(grep("rheumatoid|lupus|celiac|crohn|ulcerative|psoria*|sclerosis|ankylosing|myasthenia|dermatomyositis", PMH$Description, value = TRUE, ignore.case = TRUE))
 
 diabetes = intersect(grep("diabetes", PMH$Description, value = TRUE, ignore.case = TRUE), grep("prediabetes|family|induced|insipidus|pregnancy", PMH$Description, value = TRUE, invert = TRUE, ignore.case = TRUE))
 vitiligo = unique(grep("vitiligo", PMH$Description, value = TRUE, ignore.case = TRUE))
+dyslipidemia = unique(grep("hyperchol*|hyperlip*", PMH$Description, value = TRUE, ignore.case = TRUE))
 
 
 #intersect(grep("leukemia|lymphoma", PMH$Description, value = TRUE, ignore.case = TRUE), grep("family", PMH$Description, value = TRUE, invert = TRUE, ignore.case = TRUE))
@@ -402,6 +485,7 @@ PMH_target = PMH %>%
   dplyr::select(PT.ID, Description) %>%
   mutate(diabetes = ifelse(Description %in% diabetes, 1, 0)) %>%
   mutate(vitiligo = ifelse(Description %in% vitiligo, 1, 0)) %>%
+  mutate(dyslipidemia = ifelse(Description %in% dyslipidemia, 1, 0)) %>%
   dplyr::select(-Description) %>%
   group_by(PT.ID) %>%
   summarize_all(max, na.rm = TRUE)
@@ -433,20 +517,20 @@ meds_target = meds %>%
   dplyr::select(PT.ID, DrugName) %>%
   mutate(DrugName = tolower(word(DrugName,1))) %>%
   mutate(betablocker = ifelse(DrugName %in% beta_blocker, 1, 0))%>%
-  mutate(fibrate = ifelse(DrugName %in% fibrate, 1, 0))%>%
-  mutate(GLP1 = ifelse(DrugName %in% GLP1, 1, 0))%>%
-  mutate(metformin = ifelse(DrugName %in% metformin, 1, 0))%>%
-  mutate(SGLT2 = ifelse(DrugName %in% SGLT2, 1, 0))%>%
-  mutate(statin = ifelse(DrugName %in% statin, 1, 0))%>%
-  mutate(sulf = ifelse(DrugName %in% sulf, 1, 0))%>%
-  mutate(TZD = ifelse(DrugName %in% TZD, 1, 0)) %>%
+  mutate(dyslipidemia = ifelse(DrugName %in% c(fibrate, statin), 1, 0))%>%
+  mutate(diabetes_drug = ifelse(DrugName %in% c(GLP1, metformin, SGLT2, sulf, TZD), 1, 0))%>%
   distinct() %>%
   dplyr::select(-DrugName) %>%
   group_by(PT.ID) %>%
   summarize_all(max, na.rm = TRUE)
 
+PMH_target %>%
+  group_by(diabetes) %>%
+  summarize(count = n())
+
 meds_target %>%
-  summarize_if(is.numeric, sum, na.rm = TRUE)
+  group_by(diabetes_drug) %>%
+  summarize(count = n())
 
 
 # sum(meds_names %in% fibrate, na.rm = TRUE)
@@ -469,28 +553,57 @@ meds_target %>%
 ```
 
 ```{r}
-clinical = right_join(clinical, meds_target, by = "PT.ID")
-clinical = merge(clinical, PMH_target, by = "PT.ID")
+meds_target %>%
+  summarize_if(is.numeric, sum, na.rm = TRUE)
+PMH_target %>%
+  summarize_if(is.numeric, sum, na.rm = TRUE)
+
+combined_targets = full_join(meds_target, PMH_target, by = "PT.ID")
+combined_targets = combined_targets %>%
+  replace(is.na(.),0) %>%
+  mutate(dyslipidemia = ifelse(dyslipidemia.x == 1|dyslipidemia.y == 1, 1, 0)) %>%
+  dplyr::select(-c(dyslipidemia.x, dyslipidemia.y))
+  
+
+```
+
+
+```{r}
+clinical = unique(right_join(clinical, combined_targets, by = "PT.ID"))
 ```
 
 ```{r}
-clinical <- clinical[,c("DxAge", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", 
-"betablocker", "fibrate", "GLP1", "metformin", "SGLT2", "statin", "sulf", "TZD", "diabetes", "vitiligo", "node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
-colnames(clinical) <- c("Age", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", 
-"Betablocker", "Fibrate", "GLP1", "Metformin", "SGLT2", "Statin", "Sulfonylureas", "TZD", "Diabetes", "Vitiligo", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
-clinical = na.omit(clinical)
+clinical_final <- clinical[,c("DxAge", "Ulceration", "Sex", "final_ht", "final_wt", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "vitiligo",
+"betablocker", "dyslipidemia", "diabetes", "diabetes_drug", "node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
+colnames(clinical_final) <- c("Age", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "Vitiligo",
+"Beta_Blocker", "Dyslipidemia", "Diabetes", "Diabetes_Drug", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
+clinical_final = na.omit(clinical_final)
 
-
-#write.csv(clinical, "C://PhD work//clinpath_CT//clinical_2023+2025.csv", row.names = FALSE)
+#write.csv(clinical_final, "C://PhD work//clinpath_CT//clinical_2025.csv", row.names = FALSE)
 ```
 
 
 ```{r}
-clinical <- clinical[,c("DxAge", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", "node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
+clinical_base <- clinical[,c("DxAge", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate","node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
 
-colnames(clinical) <- c("Age", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
-clinical = na.omit(clinical)
+colnames(clinical_base) <- c("Age", "Ulceration", "Sex", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Acral_Lentiginous", "Breslow_Depth", "Mitotic_Rate", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
+clinical_base = na.omit(clinical_base)
 
-write.csv(clinical, "C://PhD work//clinpath_CT//roswell_no_added.csv", row.names = FALSE)
+#write.csv(clinical_base, "C://PhD work//clinpath_CT//roswell_base_2025.csv", row.names = FALSE)
+```
+
+78 immunotherapy patients with all med/PMH 
+```{r}
+immunotherapy = subset(treatment, EventTypeDescription == "Immunotherapy")
+immunotherapy = immunotherapy %>%
+  dplyr::select(PT.ID, EventTypeDescription)
+
+immunotherapy = unique(merge(clinical, immunotherapy, by.y = "PT.ID"))
+immunotherapy_final <- immunotherapy[,c("DxAge", "Ulceration", "Sex", "final_ht", "final_wt", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", "vitiligo",
+"betablocker", "dyslipidemia", "diabetes", "diabetes_drug", "node_met", "Mets", "Met_Time", "MSS", "MSS_Time")]
+colnames(immunotherapy_final) <- c("Age", "Ulceration", "Sex", "Height", "Weight", "BMI", "FaceHeadNeck", "UpperLimbShoulder", "LowerLimbHip", "Trunk", "Superficial_Spreading", "Nodular", "Desmoplastic", "Lentigo_Maligna", "Breslow_Depth", "Mitotic_Rate", "Vitiligo",
+"Beta_Blocker", "Dyslipidemia", "Diabetes", "Diabetes_Drug", "Node_Status", "Mets", "Met_Time", "MSS", "MSS_Time")
+immunotherapy_final = na.omit(immunotherapy_final)
+#write.csv(immunotherapy_final, "C://PhD work//clinpath_CT//clinical_2023+2025_immuno.csv", row.names = FALSE)
 ```
 

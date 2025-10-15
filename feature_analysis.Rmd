@@ -1,0 +1,201 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-09-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(rstatix)
+```
+
+```{r}
+data = read.csv("C://PhD work//clinpath_CT//clinical_2025.csv")
+data = data[,colSums(is.na(data)) == 0]
+```
+
+```{r}
+factor_col = c()
+
+for (i in 1:ncol(data)){
+  if (length(unique(data[,i])) == 2){
+    factor_col = c(factor_col, colnames(data)[[i]])
+  }
+}
+con_data = data[!(colnames(data) %in% factor_col)]
+cat_data = data[factor_col]
+con_data_summ = get_summary_stats(con_data) %>% 
+  select(c("variable", "min", "max", "median", "mean", "sd"))
+
+cat_data_summ = cat_data %>%
+  rename_with(~gsub("_","", .x, fixed = TRUE)) %>%
+  summarize_all(c(count = sum, proportion = mean, sd = sd)) %>%
+  gather(vars, vals) %>%
+  separate(vars, c("Variable", "stat")) %>%
+  spread(stat, vals) %>%
+  mutate(proportion = round(100*proportion, 1))
+cat_data_summ$Variable = factor(cat_data_summ$Variable, levels = c("Sex", "Ulceration", "SuperficialSpreading", "Nodular", "AcralLentiginous", "Desmoplastic", "LentigoMaligna", "FaceHeadNeck", "UpperLimbShoulder", "Trunk", "LowerLimbHip", "Diabetes", "Dyslipidemia", "Vitiligo", "DiabetesDrug", "BetaBlocker", "NodeStatus", "Mets", "MSS"))
+cat_data_summ = cat_data_summ[order(cat_data_summ$Variable),]
+
+con_data_summ
+cat_data_summ
+```
+
+
+Low vs High BMI
+```{r}
+data = data %>%
+  mutate(half_bmi = ifelse(BMI < quantile(data$BMI, 0.5), "bot_half", "top_half")) %>%
+  mutate(quin_bmi = case_when(
+    BMI > quantile(data$BMI, 0.10) & BMI < quantile(data$BMI, 0.30) ~ "low_quin",
+    BMI > quantile(data$BMI, 0.75) & BMI < quantile(data$BMI, 0.95) ~ "high_quin"
+  )) %>% 
+  mutate(bmi_class = case_when(
+    BMI < 18.5 ~ "underweight",
+    BMI >= 18.5 & BMI < 25 ~ "normal",
+    BMI >= 25 & BMI < 30 ~ "overweight",
+    BMI >= 30 & BMI < 35 ~ "obesity class I",
+    BMI >= 35 & BMI < 40 ~ "obesity class II",
+    BMI >= 40 ~ "obesity class III"
+  )) 
+  
+```
+
+
+```{r}
+logrank = survdiff(Surv(Met_Time, Mets) ~ half_bmi, data = data) #pvalue = 0.46
+pval = expression("italic(p) == 0.46")
+fit = survfit(Surv(Met_Time, Mets) ~ half_bmi, data = data)
+
+bmi_half = ggsurvplot(fit = fit, data = data, censor.size = 1)$plot
+bmi_half <- bmi_half +
+  ggtitle("BMI by Halves") +
+    theme_bw() +
+    xlab("Months") +
+    ylab("Survival Probability")+
+  scale_color_manual(values = c("#ef5350", "#26C6DA")) +
+  annotate(geom="text", x=25, y=0.2, label = pval, parse = TRUE,
+              color="black", size = 8) +
+  theme(legend.position = "none", plot.title=element_text(hjust=0.5, family = "serif", size = 24), axis.title = element_text(family = "serif", size = 24), axis.text = element_text(family = "serif", size = 22))
+bmi_half
+```
+
+```{r}
+logrank = survdiff(Surv(Met_Time, Mets) ~ quin_bmi, data = data)
+pval = expression("italic(p) == 0.138")
+fit = survfit(Surv(Met_Time, Mets) ~ quin_bmi, data = data)
+
+bmi_quin = ggsurvplot(fit = fit, data = data, censor.size = 1)$plot
+bmi_quin <- bmi_quin +
+  ggtitle("BMI by Quintile") +
+    theme_bw()+
+    xlab("Months") +
+    ylab("Survival Probability")+
+  scale_color_manual(values = c("#ef5350", "#26C6DA")) +
+  annotate(geom="text", x=25, y=0.2, label=pval, parse = TRUE,
+              color="black", size = 8) +
+  theme(legend.position = "none", plot.title=element_text(hjust=0.5, family = "serif", size = 24), axis.title = element_text(family = "serif", size = 24), axis.text = element_text(family = "serif", size = 22))
+bmi_quin
+
+```
+
+```{r}
+logrank = survdiff(Surv(Met_Time, Mets) ~ bmi_class, data = data)
+pval = expression("italic(p) == 0.817")
+fit = survfit(Surv(Met_Time, Mets) ~ bmi_class, data = data)
+
+bmi_class = ggsurvplot(fit = fit, data = data, censor.size = 1)$plot
+bmi_class <- bmi_class +
+  ggtitle("BMI by Class") +
+    theme_bw()+
+    xlab("Months") +
+    ylab("Survival Probability")+ 
+  annotate(geom="text", x=25, y=0.2, label=pval, parse = TRUE,
+              color="black", size = 8) +
+  theme(legend.position = "none", plot.title=element_text(hjust=0.5, family = "serif", size = 24), axis.title = element_text(family = "serif", size = 24), axis.text = element_text(family = "serif", size = 22))
+bmi_class
+
+```
+
+```{r}
+
+```
+
+
+Diabetes Demographics 
+```{r}
+data = read.csv("C://PhD work//clinpath_CT//clinical_2025.csv")
+data = data[,colSums(is.na(data)) == 0]
+
+data_DM = subset(data, Diabetes == 1)
+data_DM_drug = subset(data, Diabetes_Drug == 1)
+
+data_summary = get_summary_stats(data) %>%
+  mutate(source = "all") %>%
+  relocate(source, .before = 1) %>%
+  select(source, variable, n, min, max, median, mean, sd)
+DM_summary = get_summary_stats(data_DM) %>%
+  mutate(source = "diabetes")%>%
+  relocate(source, .before = 1)%>%
+  select(source, variable, n, min, max, median, mean, sd)
+DM_drug_summary = get_summary_stats(data_DM_drug) %>%
+  mutate(source = "diabetes_drug")%>%
+  relocate(source, .before = 1)%>%
+  select(source, variable, n, min, max, median, mean, sd)
+
+
+diabetes_df = NULL
+  
+for (i in colnames(data)){
+  row1 = subset(data_summary, variable == i)
+  row2 = subset(DM_summary, variable == i)
+  row3 = subset(DM_drug_summary, variable == i)
+  diabetes_df = rbind(diabetes_df, row1, row2, row3)
+}
+diabetes_df
+#rbind(data_summary, DM_summary, DM_drug_summary)
+
+```
+
+```{r}
+data = read.csv("C://PhD work//clinpath_CT//clinical_2025.csv")
+data = data[,colSums(is.na(data)) == 0]
+colnames(data)
+data_vit = subset(data, Vitiligo == 1)
+data_dyslip = subset(data, Dyslipidemia == 1)
+data_beta = subset(data, Beta_Blocker == 1)
+
+data_summary = get_summary_stats(data) %>%
+  mutate(source = "all") %>%
+  relocate(source, .before = 1) %>%
+  select(source, variable, n, min, max, median, mean, sd)
+dyslip_summary = get_summary_stats(data_dyslip) %>%
+  mutate(source = "dyslipidemia")%>%
+  relocate(source, .before = 1)%>%
+  select(source, variable, n, min, max, median, mean, sd)
+vit_summary = get_summary_stats(data_vit) %>%
+  mutate(source = "vitiligo")%>%
+  relocate(source, .before = 1)%>%
+  select(source, variable, n, min, max, median, mean, sd)
+beta_summary = get_summary_stats(data_beta) %>%
+  mutate(source = "beta_blocker")%>%
+  relocate(source, .before = 1)%>%
+  select(source, variable, n, min, max, median, mean, sd)
+
+comorbid_df = NULL
+
+  
+for (i in colnames(data)){
+  row1 = subset(data_summary, variable == i)
+  row2 = subset(vit_summary, variable == i)
+  row3 = subset(dyslip_summary, variable == i)
+  row4 = subset(beta_summary, variable == i)
+  comorbid_df = rbind(comorbid_df, row1, row2, row3, row4)
+}
+comorbid_df
+```
+

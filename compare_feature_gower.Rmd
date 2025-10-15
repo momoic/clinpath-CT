@@ -1,0 +1,564 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-08-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(shapviz)
+library(ggplot2)
+library(caret)
+library(survival)
+library(survminer)
+library(dplyr)
+library(gtsummary)
+library(data.table)
+library(clusterGeneration)
+library(devtools)
+library(ClusterR)
+library(nnet)
+library(randomForest)
+library(e1071)
+library(xgboost)
+library(mclust)
+library(cluster)
+library(kernlab)
+library(mboost)
+library(treeshap)
+library(kernelshap)
+library(doFuture)
+library(forcats)
+library(dbscan)
+library(StatMatch)
+library(kamila)
+```
+it's not obvious to me that accuracy predicting cluster is that useful, we probably want accuracy predicting risk based on cluster characteristics which probably means we want to use trees to sort into clusters but then calc sig to get the risk and use xgboost to predict risk
+```{r}
+data = read.csv("C://PhD work//clinpath_CT//roswell_no_added.csv")
+```
+
+using KAMILA clustering algorithm - extension of k means and GMM to categorical and continuous data
+```{r}
+set.seed(1)
+factor_col = c()
+for (i in 1:ncol(data)){
+  if (length(unique(data[,i])) == 2){
+    factor_col = c(factor_col, colnames(data)[[i]])
+  }
+} 
+
+# daisy = daisy(data, metric = "gower")
+# gower = gower.dist(data)
+# gamma = 1/(2 * median(gower)^2)
+# gauss_kernel <- exp(-gamma * gower^2)
+
+cat_data = as.data.frame(lapply(data[factor_col], as.factor))
+
+con_data = data[!(colnames(data) %in% factor_col)]
+preProcValues <- preProcess(con_data, method = c("center", "scale"))
+con_data.ml = predict(preProcValues, con_data)
+data.ml = cbind(con_data.ml, cat_data)
+
+```
+
+```{r}
+# hdb = hdbscan(gower, minPts = 10)
+# plot(hdb, show_flat = T)
+# 
+# specc(gower, centers = 3, kernel = "rbfdot")
+
+#kam_res = kamila(conVar = con_data.ml, catFactor = cat_data, numClust = 10, numInit = 200, maxIter = 20, catBw = 0.05)
+
+kam_res = kamila(conVar = con_data.ml, catFactor = cat_data, numClust = 2:10, calcNumClust = "ps", numInit = 100, maxIter = 10, numPredStrCvRun = 10, predStrThresh = 0.5, catBw = 0.05, verbose = T)
+
+index = kam_res$nClust$bestNClust
+
+plot(2:10, kam_res$nClust$psValues)
+```
+
+
+
+```{r}
+
+pr = kam_res$finalMemb
+
+data$Group <- as.factor(pr)
+data.ml$Group = as.factor(pr)
+```
+
+```{r}
+calc_sig <- function(i, data){
+  
+  data$Comparison <- NA
+  data$Comparison[data$Group != i] <- "NC"
+  data$Comparison[data$Group == i] <- "C"
+  if (length(unique(data$Comparison)) > 1){
+  logrank <- survdiff(Surv(Met_Time, Mets) ~ Comparison, data = data)
+  pval <- logrank$pvalue
+  if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) > (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+    risk <- "HR"
+  }
+  if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) < (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+  risk <- "LR"
+  }
+  if ((logrank$obs[[1]]/nrow(subset(data, Comparison == "C"))) == (logrank$obs[[2]]/nrow(subset(data, Comparison == "NC")))){
+  risk <- NA
+  }
+  if (pval < 0.05){
+    sig <- "S"
+  }
+  if (pval >= 0.05){
+  sig <- "NS"
+  }
+  if (logrank$obs[[1]] == 0){
+    z <- 1
+  }
+    if (logrank$obs[[1]] > 0){
+    z <- 0
+  }
+  row <- data.frame("Risk" = risk, "Significance" = sig, "Cluster" = i, "Z" = z)
+  return(row)
+  }
+}
+
+
+data2 <- data.table::rbindlist(lapply(1:index, calc_sig, data))
+```
+
+```{r}
+# inTraining = createDataPartition(data.ml$Age, p = 0.8, list = FALSE)
+# train_data = data.ml[inTraining,]
+# test_data = data.ml[-inTraining,]
+# 
+# inTraining = createDataPartition(data_bmi.ml$Age, p = 0.8, list = FALSE)
+# train_data_bmi = data_bmi.ml[inTraining,]
+# test_data_bmi = data_bmi.ml[-inTraining,]
+# 
+fitControl = trainControl(method = "boot", number = 5)
+
+```
+
+
+```{r}
+set.seed(1)
+# nn_model = train(Group~., data = train_data, method = "nnet",trControl = fitControl, tuneGrid = expand.grid(size = c(1,5,10), decay = c(0,0.001,0.1)))
+# forest_model = train(Group~., data = train_data, method = "rf", trControl = fitControl, tuneGrid = expand.grid(.mtry = c(2:4)))
+# svm_model = train(Group~., data = train_data, method = "lssvmRadial", trControl = fitControl)
+# xgb_model = train(Group~., data = train_data, method = "xgbLinear", trControl = fitControl, tuneGrid = expand.grid(nrounds = 300, eta = c(0.01, 0.1, 1), alpha = c(0, 1, 10), lambda = c(0, 1, 10)))
+# knn_model = train(Group~., data = train_data, method = "knn", trControl = fitControl, tuneGrid = expand.grid(k = c(5,10,15,20,25,30,35,40,45,50)))
+# forest_model = randomForest(Group~., data = data.ml, mtry = 4, ntree = 500, sampsize = floor(nrow(data.ml)*0.8), replace = TRUE)
+nn_model = train(Group~., data = data.ml, method = "nnet",trControl = fitControl, tuneGrid = expand.grid(size = c(1,5,10), decay = c(0,0.001,0.1)), verbose = F)
+
+
+```
+
+```{r}
+# nn_pred = predict(nn_model, newdata = test_data)
+# forest_pred = predict(forest_model, newdata = test_data)
+# svm_pred = predict(svm_model, newdata = test_data)
+# xgb_pred = predict(xgb_model, newdata = test_data)
+# knn_pred = predict(knn_model, newdata = test_data)
+# 
+# caret::confusionMatrix(as.factor(nn_pred), as.factor(test_data$Group))
+# caret::confusionMatrix(as.factor(forest_pred), as.factor(test_data$Group))
+# caret::confusionMatrix(as.factor(svm_pred), as.factor(test_data$Group))
+# caret::confusionMatrix(as.factor(xgb_pred), as.factor(test_data$Group))
+# caret::confusionMatrix(as.factor(knn_pred), as.factor(test_data$Group))
+
+
+```
+
+```{r}
+# options(doFuture.rng.onMisuse = "ignore")
+# registerDoFuture()
+# plan(multisession, workers = 4)
+```
+
+```{r}
+# xvars = colnames(data)
+# xvars.new = colnames(data_bmi)
+# 
+# X = data |>
+#   subset(select = xvars)
+# fit = forest_model
+# shp = permshap(fit, X = data[sample(nrow(X), 100),], bg_X = data[sample(nrow(X), 20),], type = "prob", parallel = TRUE, parallel_args = list(packages = "caret"))
+# shp = kernelshap(fit, X = X,  bg_X = data[sample(nrow(X), 200),], type = "prob", parallel = TRUE)
+# sv = shapviz(shp)
+# sv_importance(sv)
+```
+
+```{r}
+
+high_risk = subset(data, data$Group %in% subset(data2, Risk == "HR")$Cluster)
+
+data %>%
+      mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+      count(Group, Mets) %>%
+      group_by(Group) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      filter(Mets == "Dead") %>%
+      ggplot(aes(x = fct_reorder(Group, p, .desc = TRUE), y = p))+
+      geom_col()
+
+high_risk_clusters = (high_risk %>%
+    mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+    count(Group, Mets) %>%
+    group_by(Group) %>%
+    mutate(N = sum(n), p = 100*n/N) %>%
+    filter(Mets == "Dead") %>%
+    filter(p>25))$Group
+    
+low_risk = subset(data, data$Group %in% subset(data2, Risk == "LR")$Cluster)
+
+low_risk_clusters = (low_risk %>%
+      mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+      mutate(Breslow_Depth = ifelse(Breslow_Depth > 1, "High", "Low")) %>%
+      count(Group, Mets, Breslow_Depth) %>%
+      group_by(Group, Breslow_Depth) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      group_by(Group) %>%
+      reframe(ratio = p[Mets == "Alive" & Breslow_Depth == "High"]/p[Mets == "Alive" & Breslow_Depth == "Low"]) %>%
+      slice_max(ratio, n = 2))$Group
+
+```
+
+```{r}
+# risk_class = function(data, cluster_sig){
+#   data$Risk = 1
+#   data$Risk[data$Group %in% subset(cluster_sig, Risk == "HR" & Significance == "S")$Cluster] = 2
+#   data$Risk[data$Group %in% subset(cluster_sig, Z == 1)$Cluster] = 0
+#   return(data)
+# }
+
+risk_class = function(data, cluster_sig){
+  data$Risk = 1
+  
+  high_risk = subset(data, data$Group %in% subset(cluster_sig, Risk == "HR")$Cluster)
+  low_risk = subset(data, data$Group %in% subset(cluster_sig, Risk == "LR")$Cluster)
+  low_risk_clusters = (low_risk %>%
+      mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+      mutate(Breslow_Depth = ifelse(Breslow_Depth > 1, "High", "Low")) %>%
+      count(Group, Mets, Breslow_Depth) %>%
+      group_by(Group, Breslow_Depth) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      group_by(Group) %>%
+      reframe(ratio = p[Mets == "Alive" & Breslow_Depth == "High"]/p[Mets == "Alive" & Breslow_Depth == "Low"]) %>%
+      filter(ratio > 0.95))$Group
+
+      #slice_max(ratio, n = 1))$Group
+
+  high_risk_clusters = (high_risk %>%
+    mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+    count(Group, Mets) %>%
+    group_by(Group) %>%
+    mutate(N = sum(n), p = 100*n/N) %>%
+    filter(Mets == "Dead") %>%
+    filter(p>25))$Group
+
+  data$Risk[data$Group %in% high_risk_clusters] = 2
+  data$Risk[data$Group %in% low_risk_clusters] = 0
+  return(data)
+}
+```
+
+```{r}
+# risk_data = risk_class(data, data2)
+# 
+# X = risk_data[,-c(19,20)]
+# fit = xgb.train(params = list(learning_rate = 0.1), data = xgb.DMatrix(data.matrix(X), label = risk_data$Risk), nrounds =65)
+# shp = shapviz(fit, data.matrix(X), X)
+# sv_importance(shp, kind = "bee")
+
+```
+
+adding in new dataset and running trained models on it
+```{r}
+set.seed(1)
+data_new = read.csv("C://PhD work//clinpath_CT//clinical_2023+2025.csv")
+data_new = data_new[,colSums(is.na(data_new)) == 0]
+data_new = data_new[,-ncol(data_new)]
+
+factor_col = c()
+for (i in 1:ncol(data_new)){
+  if (length(unique(data_new[,i])) == 2){
+    factor_col = c(factor_col, colnames(data_new)[[i]])
+  }
+} 
+
+cat_data_new = as.data.frame(lapply(data_new[factor_col], as.factor))
+con_data_new = data_new[!(colnames(data_new) %in% factor_col)]
+preProcValues <- preProcess(con_data_new, method = c("center", "scale"))
+con_data_new.ml = predict(preProcValues, con_data_new)
+data_new.ml = cbind(con_data_new.ml, cat_data_new)
+
+
+kam_res = kamila(conVar = con_data_new.ml, catFactor = cat_data_new, numClust = 4, numInit = 1000, maxIter = 20, catBw = 0.05)
+
+#plot(2:10, kam_res$nClust$psValues)
+
+pr = kam_res$finalMemb
+
+data_new$Group <- as.factor(pr)
+data_new.ml$Group = as.factor(pr)
+data_new %>%
+      mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+      count(Group, Mets) %>%
+      group_by(Group) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      filter(Mets == "Dead") %>%
+      ggplot(aes(x = fct_reorder(Group, p, .desc = TRUE), y = p))+
+      geom_col()
+
+
+data2_new = data.table::rbindlist(lapply(1:4,calc_sig,data_new))
+
+risk_data_new = risk_class(data_new, data2_new)
+data_new.ml$Risk = risk_data_new$Risk
+
+#nn_pred = predict(nn_model, newdata = data_new.ml)
+#data_new$Group = nn_pred
+#data2_pred = data.table::rbindlist(lapply(1:index,calc_sig,data_new))
+
+
+risk_data_pred = risk_class(data_new, data2_pred)
+
+
+#need to recenter and scale 
+
+# X_new = risk_data_new[,-c(ncol(risk_data_new):(ncol(risk_data_new)-6))]
+# X_pred = risk_data_pred[,-c(ncol(risk_data_new):(ncol(data)-6))]
+
+#need to fix these columns as well
+X_new = data_new.ml[,-c(ncol(risk_data_new):(ncol(risk_data_new)-6))]
+X_pred = data_new.ml[,-c(ncol(risk_data_new):(ncol(risk_data_new)-6))]
+
+
+fit_new = xgb.train(params = list(learning_rate = 0.1), data = xgb.DMatrix(data.matrix(X_new), label = risk_data_new$Risk), nrounds =65)
+fit_pred = xgb.train(params = list(learning_rate = 0.1), data = xgb.DMatrix(data.matrix(X_pred), label = risk_data_pred$Risk), nrounds =65)
+
+#verifying accuracy of model for risk prediction
+xgb_new = predict(fit_new, data.matrix(X_new))
+xgb_new = round(xgb_new)
+
+xgb_pred = predict(fit_pred, data.matrix(X_pred))
+xgb_pred = round(xgb_pred)
+
+caret::confusionMatrix(as.factor(xgb_new), as.factor(risk_data_new$Risk))
+caret::confusionMatrix(as.factor(xgb_pred), as.factor(risk_data_pred$Risk))
+
+
+shp_new = shapviz(fit_new, data.matrix(X_new), X_new)
+shp_pred = shapviz(fit_pred, data.matrix(X_pred), X_pred)
+
+sv_importance(shp_pred, show_numbers=TRUE)
+sv_importance(shp_new, show_numbers=TRUE)
+sv_importance(shp_pred, kind = "bee")
+sv_importance(shp_new, kind = "bee")
+
+    
+# risk_data_new %>%
+#       mutate(MSS = if_else(MSS == 1, "Dead", "Alive")) %>%
+#       count(Group, MSS) %>%
+#       group_by(Group) %>%
+#       mutate(N = sum(n), p = 100*n/N) %>%
+#       filter(MSS == "Dead") %>%
+#       ggplot(aes(x = fct_reorder(Group, p, .desc = TRUE), y = p))+
+#       geom_col()
+
+```
+```{r}
+
+data_new.ml = risk_data_new[,-c((ncol(risk_data_new)-1):(ncol(risk_data_new)-6))]
+
+inTraining = createDataPartition(data_new.ml$Age, p = 0.8, list = FALSE)
+train_data = data_new.ml[inTraining,]
+test_data = data_new.ml[-inTraining,]
+
+label_train = risk_data_new[inTraining,]$Risk
+label_test = risk_data_new[-inTraining,]$Risk
+
+fitControl = trainControl(method = "boot", number = 5)
+
+fit_new = xgb.train(params = list(learning_rate = 0.1), data = xgb.DMatrix(data.matrix(train_data), label = label_train), nrounds =65)
+
+nn_model = train(Risk~., data = train_data, method = "nnet",trControl = fitControl, tuneGrid = expand.grid(size = c(1,5,10), decay = c(0,0.001,0.1)))
+forest_model = train(Risk~., data = train_data, method = "rf", trControl = fitControl, tuneGrid = expand.grid(.mtry = c(2:4)))
+#svm_model = train(Risk~., data = train_data, method = "lssvmRadial", trControl = fitControl)
+xgb_model = train(Risk~., data = train_data, method = "xgbLinear", trControl = fitControl, tuneGrid = expand.grid(nrounds = 300, eta = c(0.01, 0.1, 1), alpha = c(0, 1, 10), lambda = c(0, 1, 10)))
+knn_model = train(Risk~., data = train_data, method = "knn", trControl = fitControl, tuneGrid = expand.grid(k = c(5,10,15,20,25,30,35,40,45,50)))
+
+fit_new = xgb.train(params = list(learning_rate = 0.1), data = xgb.DMatrix(data.matrix(train_data), label = label_train), nrounds =65)
+
+fit_new = xgb.train(params = list(learning_rate = 0.1), data = xgb.DMatrix(data.matrix(data_new.ml), label = risk_data_new$Risk), nrounds = 65)
+
+xgb_new = round(predict(fit_new, data.matrix(data_new.ml)))
+# xgb_new[xgb_new>2] = 2
+# xgb_new = round(xgb_new)
+
+nn_pred = round(predict(nn_model, newdata = test_data))
+forest_pred = round(predict(forest_model, newdata = test_data))
+xgb_pred = round(predict(xgb_model, newdata = test_data))
+knn_pred = round(predict(knn_model, newdata = test_data))
+
+caret::confusionMatrix(as.factor(nn_pred), as.factor(test_data$Risk))
+caret::confusionMatrix(as.factor(forest_pred), as.factor(test_data$Risk))
+caret::confusionMatrix(as.factor(xgb_pred), as.factor(test_data$Risk))
+caret::confusionMatrix(as.factor(knn_pred), as.factor(test_data$Risk))
+caret::confusionMatrix(as.factor(xgb_new), as.factor(label_test))
+caret::confusionMatrix(as.factor(xgb_new), as.factor(risk_data_new$Risk))
+
+```
+
+```{r}
+low_risk = subset(data_new, data_new$Group %in% subset(data2_new, Risk == "LR")$Cluster)
+
+low_risk %>%
+      mutate(Mets = if_else(Mets == 1, "Dead", "Alive")) %>%
+      mutate(Breslow_Depth = ifelse(Breslow_Depth > 1, "High", "Low")) %>%
+      count(Group, Mets, Breslow_Depth) %>%
+      group_by(Group, Breslow_Depth) %>%
+      mutate(N = sum(n), p = 100*n/N) %>%
+      group_by(Group) %>%
+      reframe(ratio = p[Mets == "Alive" & Breslow_Depth == "High"]/p[Mets == "Alive" & Breslow_Depth == "Low"])
+```
+
+
+```{r}
+# unified = randomForest.unify(forest_model, data.ml)
+# treeshap_res = treeshap(unified, data.ml)
+# plot_contribution(treeshap_res, obs = 201)
+# plot_feature_importance(treeshap_res, max_vars = 8)
+# 
+# unified_new = randomForest.unify(forest_model, data_new.ml)
+# treeshap_res_new = treeshap(unified_new, data_new.ml)
+# plot_feature_importance(treeshap_res_new, max_vars = 8)
+```
+
+```{r}
+data_new = read.csv("C://PhD work//clinpath_CT//clinical_2023+2025_immuno.csv")
+data_new = data_new[,colSums(is.na(data_new)) == 0]
+
+preProcValues <- preProcess(data_new, method = c("center", "scale"))
+data_new.ml = predict(preProcValues, data_new)
+
+gmm = GMM(data_new.ml, index, dist_mode = "maha_dist", seed_mode = "random_subset", km_iter = 5,
+          em_iter = 100, verbose = F)   
+ 
+
+pr = predict(gmm, newdata = data_new.ml)
+
+data_new$Group <- as.factor(pr)
+data_new.ml$Group = as.factor(pr)
+
+data2_new = data.table::rbindlist(lapply(1:index,calc_sig,data_new))
+
+risk_data_new = risk_class(data_new, data2_new)
+
+
+X_new = risk_data_new[,-c(ncol(risk_data_new):(ncol(risk_data_new)-5))]
+
+fit_new = xgb.train(params = list(learning_rate = 0.1), data = xgb.DMatrix(data.matrix(X_new), label = risk_data_new$Risk), nrounds =65)
+
+xgb_new = predict(fit_new, data.matrix(X_new))
+xgb_new[xgb_new>2] = 2
+xgb_new = round(xgb_new)
+
+
+caret::confusionMatrix(as.factor(xgb_new), as.factor(risk_data_new$Risk))
+
+
+shp_new = shapviz(fit_new, data.matrix(X_new), X_new)
+
+sv_importance(shp_new, show_numbers=TRUE, max_display = Inf)
+sv_importance(shp_new, kind = "bee")
+```
+
+
+<!-- visualize clusters -->
+<!-- ```{r} -->
+<!-- library(Rtsne) -->
+<!-- set.seed(1) -->
+<!-- rownames(data_new.ml) <- 1:nrow(data_new.ml) -->
+<!-- unique_data_new.ml <- unique(data_new.ml) -->
+<!-- tsne_res <- Rtsne(unique_data_new.ml) -->
+<!-- tsne_vals <- as.data.frame(tsne_res$Y) -->
+<!-- colnames(tsne_vals) <- c("tSNE1", "tSNE2") -->
+<!-- tsne_vals$Cluster <- as.factor(pr[as.numeric(rownames(unique_data_new.ml))]) -->
+<!-- tsne_vals$Breslow_Depth <- data_new$Breslow_Depth[as.numeric(rownames(unique_data_new.ml))] -->
+<!-- tsne_vals$Rows <- rownames(unique_data_new.ml) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- p_tsne <- ggplot(subset(tsne_vals), aes(x=tSNE1, y=tSNE2, color=Cluster))+ -->
+<!--   geom_point(size = 0.3)+ -->
+<!--     theme_bw()+ -->
+<!--   theme(plot.title=element_text(hjust=0.5, family = "serif", size = 26), axis.title = element_text(family = "serif", size = 30), axis.text = element_text(family = "serif", size = 26), legend.key.size = unit(0.1, 'cm'), legend.title = element_text(hjust=0.5, family = "serif", size = 30), legend.text = element_text(family = "serif", size = 26))  -->
+<!-- print(p_tsne) -->
+<!-- ``` -->
+<!-- ```{r} -->
+<!-- bd_tsne <- ggplot(subset(tsne_vals), aes(x=tSNE1, y=tSNE2, color=Breslow_Depth))+ -->
+<!--   geom_point(size = 0.3)+ -->
+<!--     theme_bw()+ -->
+<!--   theme(plot.title=element_text(hjust=0.5, family = "serif", size = 26), axis.title = element_text(family = "serif", size = 30), axis.text = element_text(family = "serif", size = 26), legend.key.size = unit(0.1, 'cm'), legend.title = element_text(hjust=0.5, family = "serif", size = 30), legend.text = element_text(family = "serif", size = 26), legend.key.height = unit(5, "null"))  + -->
+<!--   scale_color_gradient(low="#26C6DA", high="#ef5350", limits = c(0,10)) -->
+<!-- print(bd_tsne) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- bd1 <- subset(data_new, Breslow_Depth <= 0.5) -->
+
+<!-- data2 <- data.table::rbindlist(lapply(1:index, calc_sig, bd1)) -->
+
+<!-- bd1$Risk <- "NS" -->
+<!-- bd1$Risk[bd1$Group %in% subset(data2, Risk == "HR" & Significance == "S")$Cluster] <- "High-Risk" -->
+<!-- bd1$Risk[bd1$Group %in% subset(data2, Risk == "LR" & Significance == "S")$Cluster] <- "Low-Risk" -->
+
+<!-- bd1.tsne <- subset(tsne_vals, Breslow_Depth <= 0.5) -->
+<!-- bd1.tsne$Risk <- "NS" -->
+<!-- bd1.tsne$Risk[bd1$Group %in% subset(data2, Risk == "HR" & Significance == "S")$Cluster] <- "High-Risk" -->
+<!-- bd1.tsne$Risk[bd1$Group %in% subset(data2, Risk == "LR" & Significance == "S")$Cluster] <- "Low-Risk" -->
+
+<!-- bd1.clusts <- ggplot(bd1.tsne, aes(x=tSNE1, y=tSNE2, color=Cluster))+ -->
+<!--   geom_point(size = 0.1)+ -->
+<!--     theme_bw()+ -->
+<!--   ggtitle("Breslow Depth \u2264 0.5 mm") + -->
+<!--   theme(legend.position = "none", plot.title=element_text(hjust=0.5, family = "serif", size = 24), axis.title = element_text(family = "serif", size = 24), axis.text = element_text(family = "serif", size = 22)) -->
+<!-- bd1.clusts -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- bd1.tsne$Risk <- factor(bd1.tsne$Risk, levels = c("Low-Risk", "NS", "High-Risk")) -->
+<!-- bd1.risk <- ggplot(bd1.tsne, aes(x=tSNE1, y=tSNE2, color=Risk))+ -->
+<!--   geom_point(size = 0.1)+ -->
+<!--   ggtitle("Breslow Depth \u2264 0.5 mm") + -->
+<!--     theme_bw()+ -->
+<!--   scale_color_manual(values = c("#ef5350", "#26C6DA", "#B0BEC5")) + -->
+<!--   theme(legend.position = "none", plot.title=element_text(hjust=0.5, family = "serif", size = 24), axis.title = element_text(family = "serif", size = 24), axis.text = element_text(family = "serif", size = 22)) -->
+<!-- bd1.risk -->
+<!-- ``` -->
+
+```{r}
+# logrank <- survdiff(Surv(Met_Time, Mets) ~ Risk, data = subset(bd1, Risk != "NS"))
+# logrank
+```
+```{r}
+# fit.clust <- survfit(Surv(Met_Time, Mets) ~ Risk, data = subset(bd1, Risk != "NS"))
+# 
+# bd1_surv <- ggsurvplot(fit = fit.clust, data = subset(bd1, Risk != "NS"), censor.size = 1)$plot
+# bd1_surv <- bd1_surv +
+#   ggtitle("Breslow Depth \u2264 0.5 mm") +
+#     theme_bw()+
+#     xlab("Months") +
+#     ylab("Survival Probability")+
+#   scale_color_manual(values = c("#ef5350", "#26C6DA")) +
+#   annotate(geom="text", x=25, y=0.2, label=pval_label,
+#               color="black", size = 8) +
+#   theme(legend.position = "none", plot.title=element_text(hjust=0.5, family = "serif", size = 24), axis.title = element_text(family = "serif", size = 24), axis.text = element_text(family = "serif", size = 22), legend.text = element_text(family = "serif", size = 22), legend.title = element_text(family = "serif", size = 22))
+# bd1_surv
+```
+
+

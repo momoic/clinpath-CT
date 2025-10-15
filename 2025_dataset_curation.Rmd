@@ -15,6 +15,11 @@ library(dplyr)
 library(stringr)
 
 clinical = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_clinical.csv")
+
+clinical %>%
+  group_by(Race1Description) %>%
+  summarize(count = n())
+
 meds = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_meds.csv")
 orders = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_orders.csv")
 PMH = read.csv("C://PhD work//clinpath_CT//2025_roswell//Paragh_Melanoma_Update_20250911_PMH.csv")
